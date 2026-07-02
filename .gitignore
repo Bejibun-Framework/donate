@@ -1,0 +1,9 @@
+node_modules/
+
+scripts/.env
+server/.env
+
+dist/
+
+.DS_Store
+.idea
