@@ -18,10 +18,11 @@ import {
 import {connectPhantom, toSolanaSigner} from "./lib/solanaSigner.js";
 import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
 import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
+import {base} from "viem/chains";
 
 // Mirrors App.jsx's RESOURCE_URL / humanizeError so the donation flow talks
 // to the same x402 resource server using the same connection & payment logic.
-const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:4021";
+const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:8787";
 
 function humanizeError(err) {
     const message = err?.message ?? String(err);
@@ -34,58 +35,35 @@ function humanizeError(err) {
 
 const NETWORKS = [
     {
-        id: "ethereum",
-        name: "Ethereum",
-        ticker: "ETH",
+        id: base.id,
+        name: base.name,
+        nativeCurrency: base.nativeCurrency,
         accent: "#8CA3F0",
-        address: "0x7a3F9c2E4b8D1a6F5c0E9B3D2A1C8F4E6D7B9A0C",
         chainType: "evm",
-        evmChainId: "0x1",
         coins: [
-            {symbol: "ETH", name: "Ethereum", native: true},
-            {symbol: "USDC", name: "USD Coin"},
-            {symbol: "USDT", name: "Tether USD"},
-            {symbol: "DAI", name: "Dai Stablecoin"}
+            {
+                symbol: "USDC",
+                contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                name: "USD Coin"
+            }
         ]
     },
     {
-        id: "bnb",
-        name: "BNB Chain",
-        ticker: "BNB",
-        accent: "#F0C24D",
-        address: "0x9E1a4C6f2B8D3a0E7c5F9B2D4A8C1E6F3D0B7A9C",
-        chainType: "evm",
-        evmChainId: "0x38",
-        coins: [
-            {symbol: "BNB", name: "BNB", native: true},
-            {symbol: "USDT", name: "Tether USD"},
-            {symbol: "BUSD", name: "Binance USD"}
-        ]
-    },
-    {
-        id: "polygon",
-        name: "Polygon",
-        ticker: "MATIC",
-        accent: "#B18CF0",
-        address: "0x4B2c8E1a9D3F6c7B0E5A2D8C1F9B4E6A3D7C0F8B",
-        chainType: "evm",
-        evmChainId: "0x89",
-        coins: [
-            {symbol: "MATIC", name: "Polygon", native: true},
-            {symbol: "USDC", name: "USD Coin"},
-            {symbol: "USDT", name: "Tether USD"}
-        ]
-    },
-    {
-        id: "solana",
+        id: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
         name: "Solana",
-        ticker: "SOL",
+        nativeCurrency: {
+            name: "Solana",
+            symbol: "SOL",
+            decimals: 9
+        },
         accent: "#5FE3B8",
-        address: "7xKXtg2CW3ojwWJHkK3nq7Y8j4Z6vN2mP9qR1sT4uV5w",
         chainType: "svm",
         coins: [
-            {symbol: "SOL", name: "Solana", native: true},
-            {symbol: "USDC", name: "USD Coin"}
+            {
+                symbol: "USDC",
+                contract: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                name: "USD Coin"
+            }
         ]
     }
 ];
@@ -171,7 +149,7 @@ function NetworkDropdown({networks, value, onChange}) {
                             >
                                 <span className="ndp-dot" style={{background: n.accent}} aria-hidden="true"/>
                                 <span className="ndp-select-text">{n.name}</span>
-                                <span className="ndp-menu-sub">{n.ticker}</span>
+                                <span className="ndp-menu-sub">{n.nativeCurrency.symbol}</span>
                             </button>
                         </li>
                     ))}
@@ -188,7 +166,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
     const [customAddress, setCustomAddress] = useState("");
     const [formError, setFormError] = useState("");
     const ref = useOutsideClose(open, setOpen);
-    const current = coins.find((c) => c.symbol === value) || coins[0];
+    const current = coins.find((c) => c.contract === value) || coins[0];
 
     function closeAll() {
         setOpen(false);
@@ -247,13 +225,13 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
                         <>
                             {coins.map((c) => (
                                 <button
-                                    key={c.symbol}
+                                    key={c.contract}
                                     type="button"
-                                    className={`ndp-menu-item ${c.symbol === value ? "ndp-menu-item-active" : ""}`}
+                                    className={`ndp-menu-item ${c.contract === value ? "ndp-menu-item-active" : ""}`}
                                     role="option"
-                                    aria-selected={c.symbol === value}
+                                    aria-selected={c.contract === value}
                                     onClick={() => {
-                                        onChange(c.symbol);
+                                        onChange(c.contract);
                                         setOpen(false);
                                     }}
                                 >
@@ -317,7 +295,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
     );
 }
 
-function WalletConnect({chainType, evmChainId, address, connecting, error, onConnect, onDisconnect}) {
+function WalletConnect({chainType, address, connecting, error, onConnect, onDisconnect}) {
     const kindLabel = chainType === "evm" ? "EVM wallet" : "Solana wallet";
 
     return (
@@ -371,7 +349,7 @@ function WalletConnect({chainType, evmChainId, address, connecting, error, onCon
 export default function Donate() {
     const [networkId, setNetworkId] = useState(NETWORKS[0].id);
     const [customCoins, setCustomCoins] = useState({});
-    const [coinSymbol, setCoinSymbol] = useState(NETWORKS[0].coins[0].symbol);
+    const [coinContract, setCoinContract] = useState(NETWORKS[0].coins[0].contract);
     const [amount, setAmount] = useState("25");
     const [activeChip, setActiveChip] = useState(25);
     const [message, setMessage] = useState("");
@@ -387,17 +365,17 @@ export default function Donate() {
         () => [...network.coins, ...(customCoins[networkId] || [])],
         [network, customCoins, networkId]
     );
-    const coin = coinList.find((c) => c.symbol === coinSymbol) || coinList[0];
+    const coin = coinList.find((c) => c.contract === coinContract) || coinList[0];
 
     function handleNetworkChange(id) {
         const n = NETWORKS.find((x) => x.id === id);
         setNetworkId(id);
         const list = [...n.coins, ...(customCoins[id] || [])];
-        setCoinSymbol(list[0].symbol);
+        setCoinContract(list[0].contract);
 
         if (n.chainType === "evm" && wallet.evm && window.ethereum) {
             window.ethereum
-                .request({method: "wallet_switchEthereumChain", params: [{chainId: n.evmChainId}]})
+                .request({method: "wallet_switchEthereumChain", params: [{chainId: n.id}]})
                 .catch(() => {
                 });
         }
@@ -448,7 +426,7 @@ export default function Donate() {
             ...prev,
             [networkId]: [...(prev[networkId] || []), token],
         }));
-        setCoinSymbol(token.symbol);
+        setCoinContract(token.contract);
     }
 
     function handleChip(v) {
@@ -487,16 +465,19 @@ export default function Donate() {
         const {fetchWithPayment, httpClient} = createPaymentFetch({
             walletClient: isEvm ? walletConn.walletClient : undefined,
             address: isEvm ? walletConn.address : undefined,
-            svmSigner,
+            svmSigner
         });
 
         try {
-            const url = `${RESOURCE_URL}/api/quote`;
+            const url = `${RESOURCE_URL}/donate`;
             const response = await fetchWithPayment(url, {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
+                headers: {
+                    "Content-Type": "application/json"
+                },
                 body: JSON.stringify({
-                    coin: coin.symbol,
+                    asset: "",
+                    amount: "",
                     network: network.id,
                     message: message.trim() || undefined
                 }),
@@ -539,7 +520,7 @@ export default function Donate() {
                     <div className="ndp-receipt">
                         <div className="ndp-receipt-top">
                             <span className="ndp-receipt-title">Donation receipt</span>
-                            <span className="ndp-receipt-id">#{network.ticker}-{coin.symbol}</span>
+                            <span className="ndp-receipt-id">#{network.nativeCurrency.symbol}-{coin.symbol}</span>
                         </div>
                         <div className="ndp-perf"/>
                         <div className="ndp-receipt-rows">
@@ -591,8 +572,8 @@ export default function Donate() {
                         <NetworkDropdown networks={NETWORKS} value={networkId} onChange={handleNetworkChange}/>
                         <CoinDropdown
                             coins={coinList}
-                            value={coin.symbol}
-                            onChange={setCoinSymbol}
+                            value={coin.contract}
+                            onChange={setCoinContract}
                             onAddCustom={handleAddCustomToken}
                             accent={network.accent}
                         />
@@ -600,7 +581,6 @@ export default function Donate() {
 
                     <WalletConnect
                         chainType={network.chainType}
-                        evmChainId={network.evmChainId}
                         address={walletAddress || null}
                         connecting={walletConnecting}
                         error={walletError[network.chainType] || ""}

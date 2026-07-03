@@ -1,0 +1,11 @@
+name = "x402-donate-server"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Non-secret configuration. Override per-environment below, or with
+# `wrangler secret put <NAME>` for anything sensitive (e.g. CDP keys).
+[vars]
+FACILITATOR_URL = "https://x402.org/facilitator"
+PAY_TO_ADDRESS = "0xdABe8750061410D35cE52EB2a418c8cB004788B3"
+SOLANA_PAY_TO_ADDRESS = "GAnoyvy9p3QFyxikWDh9hA3fmSk2uiPLNWyQ579cckMn"

@@ -3,19 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Express resource server paywalled with x402 v2 (Base Sepolia + Solana, USDC)",
+  "description": "Hono resource server paywalled with x402 v2 (Base + Solana, USDC), deployed to Cloudflare Workers",
   "scripts": {
-    "dev": "node --watch index.ts",
-    "start": "node index.ts"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@bejibun/x402": "^0.2.0",
     "@coinbase/x402": "^2.1.0",
-    "@x402/core": "^2.17.0",
-    "@x402/evm": "^2.17.0",
-    "@x402/express": "^2.17.0",
-    "@x402/svm": "^2.17.0",
-    "cors": "^2.8.6",
-    "dotenv": "^16.6.1",
-    "express": "^4.22.2"
+    "hono": "^4.12.27"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260701.1",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.107.0"
   }
 }
