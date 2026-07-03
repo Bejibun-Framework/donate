@@ -5,12 +5,12 @@
     "": {
       "name": "x402-demo-server",
       "dependencies": {
-        "@bejibun/x402": "^0.2.0",
+        "@bejibun/x402": "^0.2.1",
         "@coinbase/x402": "^2.1.0",
         "hono": "^4.12.27",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260701.1",
+        "@cloudflare/workers-types": "^4.20260702.1",
         "typescript": "^6.0.3",
         "wrangler": "^4.107.0",
       },
@@ -25,7 +25,7 @@
 
     "@bejibun/utils": ["@bejibun/utils@0.1.28", "", { "dependencies": { "@bejibun/logger": "^0.1.18", "luxon": "^3.7.2" } }, "sha512-0EWXVcQ4JspwRIVfYkuLoGsrD92zgMLITNifchOALIBQ7B5Q8nfIUmAS0oRU0tbQHLGWjDMOjWWKZ2KiITqmYQ=="],
 
-    "@bejibun/x402": ["@bejibun/x402@0.2.0", "", { "dependencies": { "@bejibun/app": "^0.1.24", "@bejibun/logger": "^0.1.22", "@bejibun/utils": "^0.1.28", "@coinbase/x402": "^2.1.0", "@x402/core": "^2.17.0", "@x402/evm": "^2.17.0", "@x402/svm": "^2.17.0" } }, "sha512-qSp0ceIOKw9xyfQa9cYpDvzQaPfwWmeEBWve8roAq0n5WhtQd3qm8NzUV+TpqxIWaPP3yZCeP/DZxUwIDoBEyg=="],
+    "@bejibun/x402": ["@bejibun/x402@0.2.1", "", { "dependencies": { "@bejibun/app": "^0.1.24", "@bejibun/logger": "^0.1.22", "@bejibun/utils": "^0.1.28", "@coinbase/x402": "^2.1.0", "@x402/core": "^2.17.0", "@x402/evm": "^2.17.0", "@x402/svm": "^2.17.0" } }, "sha512-q6NHDYJXMxrSYM3KZGe01Z9nkfoTOPjrMS2I28EyckBL7jirOWWxmmV0TKmdsIqm81iv0yFshxNILix8+Xx6QQ=="],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 

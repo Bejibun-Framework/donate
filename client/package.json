@@ -1,7 +1,6 @@
 {
-  "name": "x402-demo-client",
-  "version": "1.0.0",
-  "private": true,
+  "name": "donate-client",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

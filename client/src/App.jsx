@@ -1,25 +1,28 @@
-import {useCallback, useRef, useState} from "react";
-import logo from "./images/bejibun.png";
 import {
-    connectPhantom,
-    connectSolanaMetaMask,
-    connectSolanaWalletConnect,
-    toSolanaSigner,
-} from "./lib/solanaSigner.js";
-import {connectEvmWallet} from "./lib/wallet.js";
-import {createPaymentFetch, readSettlement, formatUsdc} from "./lib/x402Client.js";
+    AlertCircle,
+    ArrowRight,
+    ChevronDown,
+    Loader2,
+    LogOut,
+    Plus,
+    Wallet,
+    X
+} from "lucide-react";
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState
+} from "react";
+import {connectPhantom, toSolanaSigner} from "./lib/solanaSigner.js";
+import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
+import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
+import {base} from "viem/chains";
 
-const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:4021";
-
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-const BODY_METHODS = ["POST", "PUT", "PATCH"];
-const BODY_TYPES = ["json", "form-data", "x-www-form-urlencoded", "raw", "none"];
-
-function shorten(value, lead = 5, tail = 5) {
-    if (!value) return "";
-
-    return value.length > lead + tail ? `${value.slice(0, lead)}...${value.slice(-tail)}` : value;
-}
+// Mirrors App.jsx's RESOURCE_URL / humanizeError so the donation flow talks
+// to the same x402 resource server using the same connection & payment logic.
+const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:8787";
 
 function humanizeError(err) {
     const message = err?.message ?? String(err);
@@ -30,883 +33,671 @@ function humanizeError(err) {
     return message;
 }
 
-const CHIP_STYLES = {
-    request: {
-        label: "→",
-        className: "chip chip--neutral"
-    },
-    "status-402": {
-        label: "402",
-        className: "chip chip--amber"
-    },
-    wallet: {
-        label: "✎",
-        className: "chip chip--neutral"
-    },
-    signed: {
-        label: "✓",
-        className: "chip chip--green"
-    },
-    "status-200": {
-        label: "200",
-        className: "chip chip--green"
-    },
-    settled: {
-        label: "⛓",
-        className: "chip chip--green"
-    },
-    error: {
-        label: "✕",
-        className: "chip chip--red"
-    }
-};
-
-function LogLine({entry}) {
-    const style = CHIP_STYLES[entry.kind] ?? CHIP_STYLES.request;
-
-    return (
-        <div className="log-line">
-            <span className={style.className}>{style.label}</span>
-            <div className="log-line__body">
-                <div className="log-line__text">{entry.text}</div>
-                {entry.detail && <div className="log-line__detail">{entry.detail}</div>}
-            </div>
-        </div>
-    );
-}
-
-function OutputBlock({result, endpointScheme, copied, onCopy}) {
-    if (!result) return null;
-
-    let displayText;
-    if (typeof result === "object") {
-        displayText = result.result !== undefined ? result.result : JSON.stringify(result, null, 2);
-    } else {
-        displayText = String(result);
-    }
-
-    return (
-        <div className="output-block">
-            <div className="output-block__header">
-                <span className="output-block__label">
-                    {endpointScheme === "upto" ? "Generated — settled by usage" : "Response"}
-                </span>
-
-                {result.usage && (
-                    <span className="output-block__meta">
-                        authorized {formatUsdc(result.usage.authorizedMaxAtomic)} · charged{" "}
-                        {formatUsdc(result.usage.actualChargedAtomic)}
-                    </span>
-                )}
-
-                <button className={`copy-btn${copied ? " copy-btn--copied" : ""}`} onClick={onCopy}>
-                    {copied ? "✓ Copied" : "Copy"}
-                </button>
-            </div>
-
-            <div className="output-block__scroll">
-                <pre className="output-block__pre">{displayText}</pre>
-            </div>
-        </div>
-    );
-}
-
-// Generic key-value editor (Params / Headers / Form fields)
-function KeyValueEditor(
+const NETWORKS = [
     {
-        rows,
-        onChange,
-        keyPlaceholder = "Key",
-        valuePlaceholder = "Value",
-        title
-    }
-) {
-    const addRow = () => onChange([...rows, {key: "", value: "", enabled: true}]);
-    const removeRow = (i) => onChange(rows.filter((_, idx) => idx !== i));
-    const updateRow = (i, field, val) => {
-        const next = rows.map((p, idx) => (idx === i ? {...p, [field]: val} : p));
-        onChange(next);
-    };
-
-    return (
-        <div className="params-editor">
-            <div className="params-editor__header">
-                <span className="params-editor__title">{title}</span>
-                <button className="params-add-btn" onClick={addRow}>+ Add</button>
-            </div>
-
-            {rows.length === 0 && (
-                <div className="params-empty">No {title.toLowerCase()} yet. Click + Add to insert a row.</div>
-            )}
-
-            {rows.map((row, i) => (
-                <div className="params-row" key={i}>
-                    <input
-                        type="checkbox"
-                        className="params-check"
-                        checked={row.enabled}
-                        onChange={(e) => updateRow(i, "enabled", e.target.checked)}
-                    />
-                    <input
-                        className="params-input"
-                        placeholder={keyPlaceholder}
-                        value={row.key}
-                        onChange={(e) => updateRow(i, "key", e.target.value)}
-                    />
-                    <span className="params-eq">=</span>
-                    <input
-                        className="params-input"
-                        placeholder={valuePlaceholder}
-                        value={row.value}
-                        onChange={(e) => updateRow(i, "value", e.target.value)}
-                    />
-                    <button className="params-remove-btn" onClick={() => removeRow(i)}>✕</button>
-                </div>
-            ))}
-        </div>
-    );
-}
-
-// Body editor — JSON / form-data / urlencoded / raw / none
-function BodyEditor(
+        id: `eip155:${base.id}`,
+        name: base.name,
+        nativeCurrency: base.nativeCurrency,
+        accent: "#8CA3F0",
+        chainType: "evm",
+        coins: [
+            {
+                contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                symbol: "USDC",
+                decimals: 6,
+                name: "USD Coin"
+            }
+        ]
+    },
     {
-        bodyType,
-        onBodyTypeChange,
-        bodyJson,
-        onBodyJsonChange,
-        bodyFields,
-        onBodyFieldsChange,
-        bodyRaw,
-        onBodyRawChange
+        id: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        name: "Solana",
+        nativeCurrency: {
+            name: "Solana",
+            symbol: "SOL",
+            decimals: 9
+        },
+        accent: "#5FE3B8",
+        chainType: "svm",
+        coins: [
+            {
+                contract: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                symbol: "USDC",
+                decimals: 6,
+                name: "USD Coin"
+            }
+        ]
     }
-) {
-    return (
-        <div className="body-editor">
-            <div className="body-editor__header">
-                <span className="params-editor__title">Body</span>
-                <div className="body-type-tabs">
-                    {BODY_TYPES.map((t) => (
-                        <button
-                            key={t}
-                            className={`body-type-tab${bodyType === t ? " body-type-tab--active" : ""}`}
-                            onClick={() => onBodyTypeChange(t)}
-                        >
-                            {t}
-                        </button>
-                    ))}
-                </div>
-            </div>
+];
 
-            {bodyType === "none" && (
-                <div className="params-empty">This request has no body.</div>
-            )}
+const AMOUNTS = [5, 10, 25, 50, 100, 250];
 
-            {bodyType === "json" && (
-                <div className="body-raw-wrap">
-                    <div className="body-raw-lang">JSON</div>
-                    <textarea
-                        className="body-textarea"
-                        value={bodyJson}
-                        onChange={(e) => onBodyJsonChange(e.target.value)}
-                        placeholder={'{\n  "key": "value"\n}'}
-                        spellCheck={false}
-                    />
-                </div>
-            )}
+function useOutsideClose(open, setOpen) {
+    const ref = useRef(null);
 
-            {bodyType === "raw" && (
-                <div className="body-raw-wrap">
-                    <div className="body-raw-lang">Text</div>
-                    <textarea
-                        className="body-textarea"
-                        value={bodyRaw}
-                        onChange={(e) => onBodyRawChange(e.target.value)}
-                        placeholder="Raw body text…"
-                        spellCheck={false}
-                    />
-                </div>
-            )}
+    useEffect(() => {
+        if (!open) return;
 
-            {(bodyType === "form-data" || bodyType === "x-www-form-urlencoded") && (
-                <KeyValueEditor
-                    rows={bodyFields}
-                    onChange={onBodyFieldsChange}
-                    title={bodyType === "form-data" ? "Form Data" : "URL-Encoded Fields"}
-                    keyPlaceholder="Field name"
-                    valuePlaceholder="Value"
-                />
-            )}
-        </div>
-    );
-}
-
-function buildUrlWithParams(baseUrl, params) {
-    const activeParams = params.filter((p) => p.enabled && p.key.trim());
-    if (activeParams.length === 0) return baseUrl;
-
-    try {
-        const url = new URL(baseUrl);
-
-        activeParams.forEach((p) => url.searchParams.set(p.key.trim(), p.value));
-
-        return url.toString();
-    } catch {
-        const qs = activeParams
-            .map((p) => `${encodeURIComponent(p.key.trim())}=${encodeURIComponent(p.value)}`)
-            .join("&");
-
-        return baseUrl.includes("?") ? `${baseUrl}&${qs}` : `${baseUrl}?${qs}`;
-    }
-}
-
-function buildHeaders(headers) {
-    const result = {};
-
-    headers.filter((h) => h.enabled && h.key.trim()).forEach((h) => {
-        result[h.key.trim()] = h.value;
-    });
-
-    return result;
-}
-
-function buildBody(bodyType, bodyJson, bodyFields, bodyRaw) {
-    if (bodyType === "none") return {
-        body: undefined,
-        contentType: null
-    };
-
-    if (bodyType === "json") {
-        const trimmed = bodyJson.trim();
-
-        return trimmed
-            ? {body: trimmed, contentType: "application/json"}
-            : {body: undefined, contentType: null};
-    }
-
-    if (bodyType === "raw") {
-        const trimmed = bodyRaw.trim();
-
-        return trimmed
-            ? {body: trimmed, contentType: "text/plain"}
-            : {body: undefined, contentType: null};
-    }
-
-    if (bodyType === "form-data") {
-        const fd = new FormData();
-
-        bodyFields.filter((f) => f.enabled && f.key.trim()).forEach((f) => fd.append(f.key.trim(), f.value));
-
-        return {
-            body: fd,
-            contentType: null
-        }; // browser sets multipart boundary automatically
-    }
-
-    if (bodyType === "x-www-form-urlencoded") {
-        const active = bodyFields.filter((f) => f.enabled && f.key.trim());
-        if (active.length === 0) return {
-            body: undefined,
-            contentType: null
-        };
-
-        const encoded = active
-            .map((f) => `${encodeURIComponent(f.key.trim())}=${encodeURIComponent(f.value)}`)
-            .join("&");
-
-        return {
-            body: encoded,
-            contentType: "application/x-www-form-urlencoded"
-        };
-    }
-
-    return {
-        body: undefined,
-        contentType: null
-    };
-}
-
-const SOL_LABELS = {
-    phantom: "Phantom",
-    metamask: "MetaMask",
-    walletconnect: "WalletConnect"
-};
-
-// Network toggle for navbar
-function NavbarNetworkToggle({network, onChange}) {
-    const isEvm = network === "evm";
-
-    return (
-        <div className="navbar-network-toggle">
-            <button
-                className={`navbar-net-btn${isEvm ? " navbar-net-btn--active" : ""}`}
-                onClick={() => onChange("evm")}
-            >
-                EVM
-            </button>
-            <button
-                className={`navbar-net-btn${!isEvm ? " navbar-net-btn--active" : ""}`}
-                onClick={() => onChange("solana")}
-            >
-                SVM
-            </button>
-        </div>
-    );
-}
-
-// Wallet connect area for navbar
-function NavbarWalletConnect(
-    {
-        network,
-        evmWallet,
-        solWallet,
-        evmConnecting,
-        solConnecting,
-        onConnectEvm,
-        onConnectSol,
-        onDisconnectEvm,
-        onDisconnectSol
-    }
-) {
-    const [open, setOpen] = useState(false);
-    const isEvm = network === "evm";
-
-    if (isEvm) {
-        if (evmWallet) {
-            return (
-                <div className="wallet-pill">
-                    <span className="wallet-pill__dot"/>
-                    {shorten(evmWallet.address)}
-                    <button className="disconnect-btn" onClick={onDisconnectEvm}>Disconnect</button>
-                </div>
-            );
+        function onDown(e) {
+            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
         }
 
-        return (
-            <button className="btn btn--ghost" onClick={onConnectEvm} disabled={evmConnecting}>
-                {evmConnecting ? "Connecting…" : "Connect EVM wallet"}
-            </button>
-        );
-    }
+        function onKey(e) {
+            if (e.key === "Escape") setOpen(false);
+        }
 
-    if (solWallet) {
-        return (
-            <div className="wallet-pill">
-                <span className="wallet-pill__dot"/>
-                {shorten(solWallet.pubkey)} · {SOL_LABELS[solWallet.kind] ?? solWallet.kind}
-                <button className="disconnect-btn" onClick={onDisconnectSol}>Disconnect</button>
-            </div>
-        );
-    }
+        document.addEventListener("mousedown", onDown);
+        document.addEventListener("keydown", onKey);
+
+        return () => {
+            document.removeEventListener("mousedown", onDown);
+            document.removeEventListener("keydown", onKey);
+        };
+    }, [open, setOpen]);
+
+    return ref;
+}
+
+function coinInitials(symbol) {
+    return symbol.slice(0, 2).toUpperCase();
+}
+
+function shorten(value, lead = 5, tail = 5) {
+    if (!value) return "";
+
+    return value.length > lead + tail ? `${value.slice(0, lead)}...${value.slice(-tail)}` : value;
+}
+
+function NetworkDropdown({networks, value, onChange}) {
+    const [open, setOpen] = useState(false);
+    const ref = useOutsideClose(open, setOpen);
+    const current = networks.find((n) => n.id === value);
 
     return (
-        <div style={{position: "relative", flex: "1 1 auto"}}>
+        <div className="ndp-field" ref={ref}>
+            <label className="ndp-label">Network</label>
             <button
-                className="btn btn--ghost"
-                style={{width: "100%"}}
-                onClick={() => setOpen((v) => !v)}
-                disabled={solConnecting}
+                type="button"
+                className="ndp-select-btn"
+                onClick={() => setOpen((o) => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={open}
             >
-                {solConnecting ? "Connecting…" : "Connect Solana wallet ▾"}
+                <span className="ndp-select-left">
+                    <span
+                        className="ndp-dot"
+                        style={{background: current.accent}}
+                        aria-hidden="true"
+                    />
+                    <span className="ndp-select-text">{current.name}</span>
+                </span>
+
+                <ChevronDown size={16} className={`ndp-chev ${open ? "ndp-chev-up" : ""}`}/>
             </button>
 
             {open && (
-                <div className="sol-dropdown">
-                    {["phantom", "metamask", "walletconnect"].map((kind) => (
-                        <button
-                            key={kind}
-                            className="sol-dropdown__item"
-                            onClick={() => {
-                                onConnectSol(kind);
-                                setOpen(false);
-                            }}
-                        >
-                            {SOL_LABELS[kind]}
-                        </button>
+                <ul className="ndp-menu" role="listbox">
+                    {networks.map((n) => (
+                        <li key={n.id}>
+                            <button
+                                type="button"
+                                className={`ndp-menu-item ${n.id === value ? "ndp-menu-item-active" : ""}`}
+                                role="option"
+                                aria-selected={n.id === value}
+                                onClick={() => {
+                                    onChange(n.id);
+                                    setOpen(false);
+                                }}
+                            >
+                                <span className="ndp-dot" style={{background: n.accent}} aria-hidden="true"/>
+                                <span className="ndp-select-text">{n.name}</span>
+                                <span className="ndp-menu-sub">{n.nativeCurrency.symbol}</span>
+                            </button>
+                        </li>
                     ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
+    const [open, setOpen] = useState(false);
+    const [addingCustom, setAddingCustom] = useState(false);
+    const [customSymbol, setCustomSymbol] = useState("");
+    const [customAddress, setCustomAddress] = useState("");
+    const [formError, setFormError] = useState("");
+    const ref = useOutsideClose(open, setOpen);
+    const current = coins.find((c) => c.contract === value) || coins[0];
+
+    function closeAll() {
+        setOpen(false);
+        setAddingCustom(false);
+        setCustomSymbol("");
+        setCustomAddress("");
+        setFormError("");
+    }
+
+    function submitCustom(e) {
+        e.preventDefault();
+
+        const sym = customSymbol.trim().toUpperCase();
+        const addr = customAddress.trim();
+
+        if (!sym) {
+            setFormError("Enter a token symbol.");
+            return;
+        }
+        if (!/^0x[a-fA-F0-9]{6,40}$/.test(addr)) {
+            setFormError("Enter a valid contract address.");
+            return;
+        }
+
+        onAddCustom({symbol: sym, name: `${sym} · custom token`, address: addr, custom: true});
+
+        closeAll();
+    }
+
+    return (
+        <div className="ndp-field" ref={ref}>
+            <label className="ndp-label">Asset</label>
+            <button
+                type="button"
+                className="ndp-select-btn"
+                onClick={() => setOpen((o) => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={open}
+            >
+                <span className="ndp-select-left">
+                    <span className="ndp-coin-avatar" style={{borderColor: accent, color: accent}}>
+                        {coinInitials(current.symbol)}
+                    </span>
+                    <span className="ndp-select-text">
+                        {current.symbol}
+                        <span className="ndp-select-muted"> · {current.name}</span>
+                    </span>
+                </span>
+
+                <ChevronDown size={16} className={`ndp-chev ${open ? "ndp-chev-up" : ""}`}/>
+            </button>
+
+            {open && (
+                <div className="ndp-menu ndp-menu-wide" role="listbox">
+                    {!addingCustom ? (
+                        <>
+                            {coins.map((c) => (
+                                <button
+                                    key={c.contract}
+                                    type="button"
+                                    className={`ndp-menu-item ${c.contract === value ? "ndp-menu-item-active" : ""}`}
+                                    role="option"
+                                    aria-selected={c.contract === value}
+                                    onClick={() => {
+                                        onChange(c.contract);
+                                        setOpen(false);
+                                    }}
+                                >
+                                    <span className="ndp-coin-avatar" style={{borderColor: accent, color: accent}}>
+                                        {coinInitials(c.symbol)}
+                                    </span>
+
+                                    <span className="ndp-select-text">
+                                        {c.symbol}
+                                        <span className="ndp-select-muted"> · {c.name}</span>
+                                    </span>
+
+                                    {c.custom && <span className="ndp-menu-sub">custom</span>}
+                                </button>
+                            ))}
+
+                            <button
+                                type="button"
+                                className="ndp-menu-item ndp-menu-add"
+                                onClick={() => setAddingCustom(true)}
+                            >
+                                <Plus size={15}/>
+                                Add custom token
+                            </button>
+                        </>
+                    ) : (
+                        <form className="ndp-custom-form" onSubmit={submitCustom}>
+                            <div className="ndp-custom-form-head">
+                                <span>Add custom token</span>
+                                <button type="button" className="ndp-icon-btn" onClick={() => setAddingCustom(false)}
+                                        aria-label="Cancel">
+                                    <X size={14}/>
+                                </button>
+                            </div>
+
+                            <input
+                                className="ndp-input ndp-input-mono"
+                                placeholder="Symbol, e.g. LINK"
+                                value={customSymbol}
+                                onChange={(e) => setCustomSymbol(e.target.value)}
+                                maxLength={10}
+                            />
+
+                            <input
+                                className="ndp-input ndp-input-mono"
+                                placeholder="Contract address (0x...)"
+                                value={customAddress}
+                                onChange={(e) => setCustomAddress(e.target.value)}
+                            />
+
+                            {formError && <p className="ndp-form-error">{formError}</p>}
+
+                            <button type="submit" className="ndp-btn-secondary">
+                                Add token
+                            </button>
+                        </form>
+                    )}
                 </div>
+            )}
+        </div>
+    );
+}
+
+function WalletConnect({chainType, address, connecting, error, onConnect, onDisconnect}) {
+    const kindLabel = chainType === "evm" ? "EVM wallet" : "Solana wallet";
+
+    return (
+        <div className="ndp-field ndp-wallet-field">
+            <label className="ndp-label">Wallet</label>
+
+            {address ? (
+                <div className="ndp-wallet-connected">
+                    <span className="ndp-wallet-dot" aria-hidden="true"/>
+                    <span className="ndp-wallet-addr">{shorten(address)}</span>
+                    <button
+                        type="button"
+                        className="ndp-wallet-disconnect"
+                        onClick={onDisconnect}
+                        aria-label="Disconnect wallet"
+                    >
+                        <LogOut size={14}/>
+                    </button>
+                </div>
+            ) : (
+                <button
+                    type="button"
+                    className="ndp-connect-btn"
+                    onClick={onConnect}
+                    disabled={connecting}
+                >
+                    {connecting ? (
+                        <>
+                            <Loader2 size={16} className="ndp-spin"/>
+                            Connecting…
+                        </>
+                    ) : (
+                        <>
+                            <Wallet size={16}/>
+                            Connect {kindLabel}
+                        </>
+                    )}
+                </button>
+            )}
+
+            {error && (
+                <p className="ndp-wallet-error">
+                    <AlertCircle size={13}/>
+                    {error}
+                </p>
             )}
         </div>
     );
 }
 
 export default function App() {
-    const [network, setNetwork] = useState("evm");
+    const [networkId, setNetworkId] = useState(NETWORKS[0].id);
+    const [customCoins, setCustomCoins] = useState({});
+    const [coinContract, setCoinContract] = useState(NETWORKS[0].coins[0].contract);
+    const [amount, setAmount] = useState("25");
+    const [activeChip, setActiveChip] = useState(25);
+    const [message, setMessage] = useState("");
+    const [wallet, setWallet] = useState({evm: null, svm: null});
+    const [walletConnecting, setWalletConnecting] = useState(false);
+    const [walletError, setWalletError] = useState({evm: "", svm: ""});
+    const [sending, setSending] = useState(false);
+    const [sendError, setSendError] = useState("");
+    const [sendResult, setSendResult] = useState(null);
 
-    const [evmWallet, setEvmWallet] = useState(null);
-    const [evmConnecting, setEvmConnecting] = useState(false);
-    const [solWallet, setSolWallet] = useState(null);
-    const [solConnecting, setSolConnecting] = useState(false);
+    const network = NETWORKS.find((n) => n.id === networkId);
+    const coinList = useMemo(
+        () => [...network.coins, ...(customCoins[networkId] || [])],
+        [network, customCoins, networkId]
+    );
+    const coin = coinList.find((c) => c.contract === coinContract) || coinList[0];
 
-    const [urlInput, setUrlInput] = useState(`${RESOURCE_URL}/api/quote`);
-    const [method, setMethod] = useState("GET");
-    const [params, setParams] = useState([]);
-    const [headers, setHeaders] = useState([]);
-    const [activeTab, setActiveTab] = useState("params");
+    function handleNetworkChange(id) {
+        const n = NETWORKS.find((x) => x.id === id);
+        setNetworkId(id);
+        const list = [...n.coins, ...(customCoins[id] || [])];
+        setCoinContract(list[0].contract);
 
-    const [bodyType, setBodyType] = useState("none");
-    const [bodyJson, setBodyJson] = useState("");
-    const [bodyRaw, setBodyRaw] = useState("");
-    const [bodyFields, setBodyFields] = useState([]);
+        if (n.chainType === "evm" && wallet.evm && window.ethereum) {
+            window.ethereum
+                .request({method: "wallet_switchEthereumChain", params: [{chainId: n.id}]})
+                .catch(() => {
+                });
+        }
+    }
 
-    const [isRequesting, setIsRequesting] = useState(false);
-    const [log, setLog] = useState([]);
-    const [result, setResult] = useState(null);
-    const [detectedScheme, setDetectedScheme] = useState(null);
-    const [settlement, setSettlement] = useState(null);
-    const [error, setError] = useState(null);
-    const [copied, setCopied] = useState(false);
-
-    const logRef = useRef(null);
-
-    const handleNetworkChange = useCallback((net) => {
-        setNetwork(net);
-        setError(null);
-    }, []);
-
-    const handleConnectEvm = useCallback(async () => {
-        setEvmConnecting(true);
-        setError(null);
+    async function connectEvmWallet() {
+        setWalletError((e) => ({...e, evm: ""}));
+        setWalletConnecting(true);
 
         try {
-            const {walletClient, address} = await connectEvmWallet();
-            setEvmWallet({walletClient, address});
+            const {walletClient, address} = await connectEvmWalletLib();
+            setWallet((w) => ({...w, evm: {walletClient, address}}));
         } catch (err) {
-            setError(humanizeError(err));
+            setWalletError((e) => ({...e, evm: humanizeError(err)}));
         } finally {
-            setEvmConnecting(false);
+            setWalletConnecting(false);
         }
-    }, []);
+    }
 
-    const handleConnectSol = useCallback(async (kind) => {
-        setSolConnecting(true);
-        setError(null);
+    async function connectSvmWallet() {
+        setWalletError((e) => ({...e, svm: ""}));
+        setWalletConnecting(true);
 
         try {
-            const connectors = {
-                phantom: connectPhantom,
-                metamask: connectSolanaMetaMask,
-                walletconnect: connectSolanaWalletConnect,
-            };
-            const conn = await connectors[kind]();
-
-            setSolWallet({...conn, kind});
+            const conn = await connectPhantom();
+            setWallet((w) => ({...w, svm: conn}));
         } catch (err) {
-            setError(humanizeError(err));
+            setWalletError((e) => ({...e, svm: humanizeError(err)}));
         } finally {
-            setSolConnecting(false);
+            setWalletConnecting(false);
         }
-    }, []);
+    }
 
-    const handleDisconnectSol = useCallback(async () => {
-        try {
-            await solWallet?.adapter?.disconnect?.();
-        } catch {
-            /* ignore */
-        }
-        setSolWallet(null);
-    }, [solWallet]);
-
-    const handleDisconnectEvm = useCallback(() => setEvmWallet(null), []);
-
-    const handleMethodChange = useCallback((m) => {
-        setMethod(m);
-
-        if (BODY_METHODS.includes(m)) {
-            // auto-switch to body tab when picking a body method
-            if (activeTab === "params" && bodyType === "none") setBodyType("json");
-
-            setActiveTab("body");
-        } else {
-            if (activeTab === "body") setActiveTab("params");
-        }
-    }, [activeTab, bodyType]);
-
-    const handleSend = useCallback(async () => {
-        const isEvm = network === "evm";
-        if (isEvm && !evmWallet) return;
-        if (!isEvm && !solWallet) return;
-        if (!urlInput.trim()) return;
-
-        const rawUrl = urlInput.trim();
-        const fullUrl = buildUrlWithParams(
-            rawUrl.startsWith("http") ?
-                rawUrl :
-                `${RESOURCE_URL}${rawUrl.startsWith("/") ? rawUrl : "/" + rawUrl}`,
-            params
-        );
-
-        const extraHeaders = buildHeaders(headers);
-        const {body, contentType} = buildBody(bodyType, bodyJson, bodyFields, bodyRaw);
-
-        // Merge content-type unless user already set it
-        const finalHeaders = {...extraHeaders};
-        if (contentType && !finalHeaders["Content-Type"] && !finalHeaders["content-type"]) {
-            finalHeaders["Content-Type"] = contentType;
+    async function disconnectWallet(type) {
+        if (type === "svm") {
+            try {
+                await wallet.svm?.adapter?.disconnect?.();
+            } catch {
+                /* ignore */
+            }
         }
 
-        let path;
-        try {
-            path = new URL(fullUrl).pathname + new URL(fullUrl).search;
-        } catch {
-            path = fullUrl;
-        }
+        setWallet((w) => ({...w, [type]: null}));
+    }
 
-        setDetectedScheme(null);
-        setIsRequesting(true);
-        setError(null);
-        setSettlement(null);
-        setResult(null);
-        setCopied(false);
+    function handleAddCustomToken(token) {
+        setCustomCoins((prev) => ({
+            ...prev,
+            [networkId]: [...(prev[networkId] || []), token],
+        }));
+        setCoinContract(token.contract);
+    }
 
-        const entries = [];
-        const pushLog = (entry) => {
-            entries.push({id: entries.length, ...entry});
-            setLog([...entries]);
-            setTimeout(() => logRef.current?.scrollTo({top: logRef.current.scrollHeight, behavior: "smooth"}), 50);
-        };
+    function handleChip(v) {
+        setActiveChip(v);
+        setAmount(String(v));
+    }
 
-        pushLog({kind: "request", text: `${method} ${path}`});
+    function handleManualAmount(v) {
+        const clean = v.replace(/[^0-9.]/g, "");
+        setAmount(clean);
 
-        const svmSigner = !isEvm && solWallet
-            ? toSolanaSigner(solWallet.provider, solWallet.pubkey)
+        const n = Number(clean);
+        setActiveChip(AMOUNTS.includes(n) ? n : null);
+    }
+
+    const numericAmount = Number(amount);
+    const canDonate = numericAmount > 0 && Number.isFinite(numericAmount);
+
+    const isEvm = network.chainType === "evm";
+    const walletConn = isEvm ? wallet.evm : wallet.svm;
+    const walletAddress = isEvm ? walletConn?.address : walletConn?.pubkey;
+
+    // Same payment logic as App.jsx's handleSend: build an x402 payment-aware
+    // fetch for the connected wallet and hit the (402-protected) donate endpoint.
+    const handleDonate = useCallback(async () => {
+        if (!walletConn || !canDonate) return;
+
+        setSending(true);
+        setSendError("");
+        setSendResult(null);
+
+        const svmSigner = !isEvm && walletConn
+            ? toSolanaSigner(walletConn.provider, walletConn.pubkey)
             : undefined;
 
         const {fetchWithPayment, httpClient} = createPaymentFetch({
-            walletClient: isEvm ? evmWallet.walletClient : undefined,
-            address: isEvm ? evmWallet.address : undefined,
-            svmSigner,
-            onEvent: (evt) => {
-                if (evt.type === "payment-required") {
-                    const r = evt.requirements;
-                    if (r.scheme) setDetectedScheme(r.scheme);
-
-                    pushLog({
-                        kind: "status-402",
-                        text: "402 Payment Required",
-                        detail: `${r.scheme} · ${r.network} · ${formatUsdc(r.amount) ?? r.amount} → ${shorten(r.payTo)}`,
-                    });
-                    pushLog({
-                        kind: "wallet",
-                        text: isEvm ? "Requesting signature in wallet (EIP-712)…" : "Requesting Solana transaction signature…",
-                    });
-                } else if (evt.type === "payment-signed") {
-                    pushLog({kind: "signed", text: "Payment authorization signed"});
-                    pushLog({kind: "request", text: `${method} ${path}  (+ PAYMENT-SIGNATURE header)`});
-                } else if (evt.type === "payment-failed") {
-                    pushLog({kind: "error", text: `Payment failed: ${humanizeError(evt.error)}`});
-                }
-            },
+            walletClient: isEvm ? walletConn.walletClient : undefined,
+            address: isEvm ? walletConn.address : undefined,
+            svmSigner
         });
 
         try {
-            const fetchOptions = {
-                method,
-                ...(Object.keys(finalHeaders).length > 0 ? {headers: finalHeaders} : {}),
-                ...(body !== undefined ? {body} : {}),
-            };
+            const url = `${RESOURCE_URL}/donate`;
+            const response = await fetchWithPayment(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    price: {
+                        asset: coin.contract,
+                        amount: "1000",
+                        extra: {
+                            name: coin.name,
+                            version: "2"
+                        }
+                    },
+                    symbol: coin.symbol,
+                    decimals: coin.decimals,
+                    network: {
+                        id: network.id,
+                        name: network.name
+                    },
+                    address: walletAddress,
+                    message: message.trim() || undefined
+                }),
+            });
 
-            const response = await fetchWithPayment(fullUrl, fetchOptions);
             if (!response.ok) {
                 const text = await response.text().catch(() => "");
 
                 throw new Error(text || `Request failed with status ${response.status}`);
             }
 
-            pushLog({kind: "status-200", text: "200 OK"});
-
             const data = await response.json();
-            setResult(data);
+            const settlement = readSettlement(httpClient, response);
 
-            const settle = readSettlement(httpClient, response);
-            if (settle) {
-                setSettlement(settle);
-
-                const explorerBase = isEvm ? "https://basescan.org/tx/" : "https://solscan.io/tx/";
-
-                pushLog({
-                    kind: "settled",
-                    text: detectedScheme === "exact" ? "Payment settled on-chain" : "Payment settled on-chain (actual usage only)",
-                    detail: settle.transaction ? `tx ${shorten(settle.transaction)}` : "confirmed by facilitator",
-                });
-
-                settle._explorerBase = explorerBase;
-            }
+            setSendResult({data, settlement});
         } catch (err) {
-            const message = humanizeError(err);
-            pushLog({kind: "error", text: message});
-            setError(message);
+            setSendError(humanizeError(err));
         } finally {
-            setIsRequesting(false);
+            setSending(false);
         }
-    }, [
-        network,
-        evmWallet,
-        solWallet,
-        urlInput,
-        method,
-        params,
-        headers,
-        bodyType,
-        bodyJson,
-        bodyFields,
-        bodyRaw,
-        detectedScheme
-    ]);
-
-    const handleCopy = useCallback(() => {
-        if (!result) return;
-
-        const text = typeof result === "object" ? (result.result ?? JSON.stringify(result, null, 2)) : String(result);
-
-        navigator.clipboard.writeText(text).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        });
-    }, [result]);
-
-    // Preview URL always reflects query params
-    const previewUrl = params.some((p) => p.enabled && p.key.trim())
-        ? buildUrlWithParams(urlInput, params)
-        : null;
-
-    const isEvm = network === "evm";
-    const walletReady = isEvm ? !!evmWallet : !!solWallet;
-    const isBodyMethod = BODY_METHODS.includes(method);
-
-    const activeParamsCount = params.filter((p) => p.enabled && p.key.trim()).length;
-    const activeHeadersCount = headers.filter((h) => h.enabled && h.key.trim()).length;
-    const activeBodyCount = bodyType !== "none" && bodyType !== "json" && bodyType !== "raw"
-        ? bodyFields.filter((f) => f.enabled && f.key.trim()).length
-        : (bodyType === "json" && bodyJson.trim() ? 1 : bodyType === "raw" && bodyRaw.trim() ? 1 : 0);
+    }, [walletConn, isEvm, canDonate, numericAmount, coin, network, message]);
 
     return (
-        <div className="page">
-            <header className="topbar">
-                <div className="brand">
-                    <span className="brand__mark">
-                        <img src={logo} alt="Bejibun" width={32}/>
-                    </span>
-                    <div className="brand__text">
-                        <div className="brand__title">Bejibun x402 Playground</div>
-                        <div className="brand__subtitle">A place for you to play with x402 protocol</div>
-                    </div>
-                </div>
+        <div className="ndp-root">
+            <div className="ndp-bg-grid" aria-hidden="true"/>
 
-                <div className="navbar-right">
-                    <NavbarNetworkToggle network={network} onChange={handleNetworkChange}/>
-                    <NavbarWalletConnect
-                        network={network}
-                        evmWallet={evmWallet}
-                        solWallet={solWallet}
-                        evmConnecting={evmConnecting}
-                        solConnecting={solConnecting}
-                        onConnectEvm={handleConnectEvm}
-                        onConnectSol={handleConnectSol}
-                        onDisconnectEvm={handleDisconnectEvm}
-                        onDisconnectSol={handleDisconnectSol}
-                    />
-                </div>
-            </header>
+            <div className="ndp-shell">
+                {/* -------- Left: narrative + receipt -------- */}
+                <div className="ndp-left">
+                    <div className="ndp-eyebrow">On-chain support</div>
+                    <h1 className="ndp-headline">
+                        Fuel the <em>next commit.</em>
+                    </h1>
+                    <p className="ndp-sub">
+                        Bejibun Labs builds open tools for the decentralized web.
+                        Contributions move straight from your wallet to the project's — no processor,
+                        no delay, no cut taken along the way.
+                    </p>
 
-            <main className="layout">
-                <section className="panel">
-                    <div className="panel__header">
-                        <span className="panel__eyebrow">Resources</span>
-                        <h2>Send a payment request</h2>
-                        <p className="panel__desc">
-                            Enter any x402-protected endpoint. Choose your network, connect a wallet, and pay.
-                        </p>
-                    </div>
-
-                    <div className="request-card">
-                        {/* Method + URL row */}
-                        <div className="url-row">
-                            <select
-                                className="method-select"
-                                value={method}
-                                onChange={(e) => handleMethodChange(e.target.value)}
-                            >
-                                {HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                            <input
-                                className="url-input"
-                                type="text"
-                                value={urlInput}
-                                onChange={(e) => setUrlInput(e.target.value)}
-                                onKeyDown={(e) => e.key === "Enter" && walletReady && !isRequesting && handleSend()}
-                                placeholder="https://api.example.com/endpoint"
-                                spellCheck={false}
-                                autoComplete="off"
-                            />
+                    <div className="ndp-receipt">
+                        <div className="ndp-receipt-top">
+                            <span className="ndp-receipt-title">Donation receipt</span>
+                            <span className="ndp-receipt-id">#{network.nativeCurrency.symbol}-{coin.symbol}</span>
                         </div>
-
-                        {/* Preview URL — always shows query params regardless of method */}
-                        {previewUrl && (
-                            <div className="url-preview">
-                                <span className="url-preview__label">Preview:</span>
-                                <span className="url-preview__url">{previewUrl}</span>
+                        <div className="ndp-perf"/>
+                        <div className="ndp-receipt-rows">
+                            {walletAddress && (
+                                <div className="ndp-receipt-row">
+                                    <span className="ndp-receipt-key">From</span>
+                                    <span
+                                        className="ndp-receipt-val">{shorten(walletAddress)}</span>
+                                </div>
+                            )}
+                            <div className="ndp-receipt-row">
+                                <span className="ndp-receipt-key">Network</span>
+                                <span className="ndp-receipt-val">{network.name}</span>
                             </div>
-                        )}
-
-                        {/* Tabs */}
-                        <div className="req-tabs">
-                            <button
-                                className={`req-tab${activeTab === "params" ? " req-tab--active" : ""}`}
-                                onClick={() => setActiveTab("params")}
-                            >
-                                Params
-                                {activeParamsCount > 0 && <span className="req-tab__badge">{activeParamsCount}</span>}
-                            </button>
-
-                            <button
-                                className={`req-tab${activeTab === "headers" ? " req-tab--active" : ""}`}
-                                onClick={() => setActiveTab("headers")}
-                            >
-                                Headers
-                                {activeHeadersCount > 0 && <span className="req-tab__badge">{activeHeadersCount}</span>}
-                            </button>
-
-                            {isBodyMethod && (
-                                <button
-                                    className={`req-tab${activeTab === "body" ? " req-tab--active" : ""}`}
-                                    onClick={() => setActiveTab("body")}
-                                >
-                                    Body
-                                    {activeBodyCount > 0 && <span className="req-tab__badge">{activeBodyCount}</span>}
-                                </button>
-                            )}
-                        </div>
-
-                        <div className="payload-scroll">
-                            {activeTab === "params" && (
-                                <KeyValueEditor
-                                    rows={params}
-                                    onChange={setParams}
-                                    title="Query Params"
-                                    keyPlaceholder="Key"
-                                    valuePlaceholder="Value"
-                                />
-                            )}
-
-                            {activeTab === "headers" && (
-                                <KeyValueEditor
-                                    rows={headers}
-                                    onChange={setHeaders}
-                                    title="Headers"
-                                    keyPlaceholder="Header name"
-                                    valuePlaceholder="Value"
-                                />
-                            )}
-
-                            {activeTab === "body" && isBodyMethod && (
-                                <BodyEditor
-                                    bodyType={bodyType}
-                                    onBodyTypeChange={setBodyType}
-                                    bodyJson={bodyJson}
-                                    onBodyJsonChange={setBodyJson}
-                                    bodyFields={bodyFields}
-                                    onBodyFieldsChange={setBodyFields}
-                                    bodyRaw={bodyRaw}
-                                    onBodyRawChange={setBodyRaw}
-                                />
-                            )}
-                        </div>
-
-                        <button
-                            className="btn btn--primary send-btn"
-                            onClick={handleSend}
-                            disabled={!walletReady || isRequesting || !urlInput.trim()}
-                        >
-                            {isRequesting ? "Processing…" : "Send request & pay"}
-                        </button>
-
-                        {!walletReady && (
-                            <p className="hint">
-                                {isEvm ?
-                                    "Connect an EVM wallet to send a payment." :
-                                    "Connect a Solana wallet to send a payment."
-                                }
-                            </p>
-                        )}
-
-                        {error && <div className="error-banner">{error}</div>}
-                    </div>
-
-                    <OutputBlock
-                        result={result}
-                        endpointScheme={detectedScheme}
-                        copied={copied}
-                        onCopy={handleCopy}
-                    />
-
-                    {settlement && (
-                        <div className="settlement">
-                            <div className="settlement__row">
-                                <span>status</span>
-                                <span>{settlement.success ? "settled" : "pending"}</span>
+                            <div className="ndp-receipt-row">
+                                <span className="ndp-receipt-key">Asset</span>
+                                <span className="ndp-receipt-val">{coin.symbol}</span>
+                            </div>
+                            <div className="ndp-receipt-row">
+                                <span className="ndp-receipt-key">Amount</span>
+                                <span className="ndp-receipt-val ndp-receipt-amount">
+                                    {canDonate ? `$${numericAmount.toLocaleString()}` : "—"}
+                                </span>
                             </div>
 
-                            {settlement.transaction && (
-                                <div className="settlement__row">
-                                    <span>tx hash</span>
-                                    <a
-                                        href={`${settlement._explorerBase ?? "https://basescan.org/tx/"}${settlement.transaction}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                    >
-                                        {shorten(settlement.transaction, 10, 8)}
-                                    </a>
+                            {message.trim() && (
+                                <div className="ndp-receipt-row">
+                                    <span className="ndp-receipt-key">Note</span>
+                                    <span className="ndp-receipt-note">&ldquo;{message.trim()}&rdquo;</span>
                                 </div>
                             )}
                         </div>
+                        <div className="ndp-receipt-bottom">Settles directly on {network.name}</div>
+                    </div>
+                </div>
+
+                {/* -------- Right: form card -------- */}
+                <div className="ndp-card">
+                    <h2 className="ndp-card-title">
+                        {sendResult ? "Donation sent" : "Make a donation"}
+                    </h2>
+                    <p className="ndp-card-sub">
+                        {sendResult
+                            ? "Thank you — your donation has settled on-chain."
+                            : "Choose a network and asset, then set an amount."}
+                    </p>
+
+                    <div className="ndp-row-2">
+                        <NetworkDropdown networks={NETWORKS} value={networkId} onChange={handleNetworkChange}/>
+                        <CoinDropdown
+                            coins={coinList}
+                            value={coin.contract}
+                            onChange={setCoinContract}
+                            onAddCustom={handleAddCustomToken}
+                            accent={network.accent}
+                        />
+                    </div>
+
+                    <WalletConnect
+                        chainType={network.chainType}
+                        address={walletAddress || null}
+                        connecting={walletConnecting}
+                        error={walletError[network.chainType] || ""}
+                        onConnect={network.chainType === "evm" ? connectEvmWallet : connectSvmWallet}
+                        onDisconnect={() => disconnectWallet(network.chainType)}
+                    />
+
+                    <label className="ndp-label">Amount</label>
+                    <div className="ndp-amount-grid">
+                        {AMOUNTS.map((v) => (
+                            <button
+                                key={v}
+                                type="button"
+                                className={`ndp-chip ${activeChip === v ? "ndp-chip-active" : ""}`}
+                                onClick={() => handleChip(v)}
+                            >
+                                ${v}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="ndp-amount-input-wrap">
+                        <span className="ndp-amount-currency">$</span>
+                        <input
+                            className="ndp-amount-input"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={amount}
+                            onChange={(e) => handleManualAmount(e.target.value)}
+                            aria-label="Custom amount in dollars"
+                        />
+                        <span className="ndp-amount-suffix">USD equiv.</span>
+                    </div>
+
+                    <label className="ndp-label">Message (optional)</label>
+                    <textarea
+                        className="ndp-textarea"
+                        placeholder="Say a few words to go with your donation..."
+                        value={message}
+                        maxLength={200}
+                        onChange={(e) => setMessage(e.target.value)}
+                    />
+                    <p className="ndp-char-count">{message.length}/200</p>
+
+                    {!sendResult && (
+                        <button
+                            type="button"
+                            className="ndp-submit"
+                            disabled={!canDonate || !walletAddress || sending}
+                            onClick={handleDonate}
+                        >
+                            {sending ? (
+                                <>
+                                    <Loader2 size={16} className="ndp-spin"/>
+                                    Processing…
+                                </>
+                            ) : (
+                                <>
+                                    Donate {canDonate ? `$${numericAmount.toLocaleString()}` : ""} in {coin.symbol}
+                                    <ArrowRight size={17}/>
+                                </>
+                            )}
+                        </button>
                     )}
 
-                    <p className="hint hint--muted">
-                        {isEvm ? (
-                            <>
-                                Testnet funds:
-                                &nbsp;
-                                <a
-                                    href="https://www.alchemy.com/faucets/base-sepolia"
-                                    target="_blank"
-                                    rel="noreferrer"
-                                >
-                                    Base Sepolia ETH
-                                </a>
-                                {" · "}
-                                <a
-                                    href="https://faucet.circle.com"
-                                    target="_blank"
-                                    rel="noreferrer"
-                                >
-                                    Circle USDC faucet
-                                </a>.
-                                &nbsp;
-                                Want <code>batch-settlement</code>? See <code>scripts/batch-settlement-client.mjs</code>.
-                            </>
-                        ) : (
-                            <>
-                                Solana payments use mainnet USDC.
-                                Make sure your Solana wallet has USDC and SOL for fees.
-                                &nbsp;
-                                Requires <code>SOLANA_PAY_TO_ADDRESS</code> and CDP keys on the server.
-                            </>
-                        )}
-                    </p>
-                </section>
+                    {!walletAddress && !sendResult && (
+                        <p className="ndp-wallet-error">
+                            <AlertCircle size={13}/>
+                            Connect a {network.name} wallet to send this donation.
+                        </p>
+                    )}
 
-                <section className="panel panel--log">
-                    <div className="panel__header">
-                        <span className="panel__eyebrow">HTTP exchange</span>
-                        <h2>Live transcript</h2>
-                    </div>
-                    <div className="log" ref={logRef}>
-                        {log.length === 0 && <div className="log__empty">Nothing sent yet.</div>}
+                    {sendError && (
+                        <p className="ndp-wallet-error">
+                            <AlertCircle size={13}/>
+                            {sendError}
+                        </p>
+                    )}
 
-                        {log.map((entry) => <LogLine key={entry.id} entry={entry}/>)}
-                    </div>
-                </section>
-            </main>
+                    {sendResult && (
+                        <>
+                            <p className="ndp-reveal-note">
+                                Settled on {network.name}
+                                {sendResult.settlement?.transaction && (
+                                    <> — tx {shorten(sendResult.settlement.transaction, 10, 8)}</>
+                                )}
+                                {message.trim() ? " — your note was saved with this donation." : "."}
+                            </p>
+
+                            <button
+                                type="button"
+                                className="ndp-btn-secondary"
+                                onClick={() => {
+                                    setSendResult(null);
+                                    setSendError("");
+                                }}
+                            >
+                                Make another donation
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

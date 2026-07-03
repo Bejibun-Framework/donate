@@ -1,21 +1,20 @@
 {
-  "name": "x402-demo-server",
-  "version": "1.0.0",
-  "private": true,
+  "name": "donate-server",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Hono resource server paywalled with x402 v2 (Base + Solana, USDC), deployed to Cloudflare Workers",
+  "description": "Hono resource server paywalled with x402, deployed to Cloudflare Workers",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@bejibun/x402": "^0.2.0",
+    "@bejibun/x402": "^0.2.1",
     "@coinbase/x402": "^2.1.0",
     "hono": "^4.12.27"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260701.1",
+    "@cloudflare/workers-types": "^4.20260702.1",
     "typescript": "^6.0.3",
     "wrangler": "^4.107.0"
   }
