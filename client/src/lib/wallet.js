@@ -1,5 +1,6 @@
 import {createWalletClient, custom} from "viem";
-import {base} from "viem/chains";
+// import {base} from "viem/chains";
+import {baseSepolia} from "viem/chains";
 
 /** Returns window.ethereum or throws a friendly error if no wallet is injected. */
 function getInjectedProvider() {
@@ -18,14 +19,14 @@ export async function connectEvmWallet() {
     const provider = getInjectedProvider();
 
     const walletClient = createWalletClient({
-        chain: base,
+        chain: baseSepolia,
         transport: custom(provider)
     });
 
     const [address] = await walletClient.requestAddresses();
 
     try {
-        await walletClient.switchChain({id: base.id});
+        await walletClient.switchChain({id: baseSepolia.id});
     } catch (err) {
         const code = err?.code ?? err?.cause?.code;
         if (code === 4902) {
@@ -33,11 +34,11 @@ export async function connectEvmWallet() {
                 method: "wallet_addEthereumChain",
                 params: [
                     {
-                        chainId: base.id,
-                        chainName: base.name,
-                        nativeCurrency: base.nativeCurrency,
-                        rpcUrls: base.rpcUrls,
-                        blockExplorerUrls: base.blockExplorers
+                        chainId: baseSepolia.id,
+                        chainName: baseSepolia.name,
+                        nativeCurrency: baseSepolia.nativeCurrency,
+                        rpcUrls: baseSepolia.rpcUrls,
+                        blockExplorerUrls: baseSepolia.blockExplorers
                     }
                 ],
             });

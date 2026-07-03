@@ -1,10 +1,8 @@
 import type {Network} from "@x402/core";
 import {facilitator} from "@coinbase/x402";
 import {HTTPFacilitatorClient} from "@x402/core/server";
-import {BatchSettlementEvmScheme} from "@x402/evm/batch-settlement/server";
 import {ExactEvmScheme} from "@x402/evm/exact/server";
-import {UptoEvmScheme} from "@x402/evm/upto/server";
-import {paymentMiddleware, setSettlementOverrides, x402ResourceServer} from "@x402/express";
+import {paymentMiddleware, x402ResourceServer} from "@x402/express";
 import {ExactSvmScheme} from "@x402/svm/exact/server";
 import cors from "cors";
 import express from "express";
@@ -56,8 +54,6 @@ app.use(
 
 const resourceServer: x402ResourceServer = new x402ResourceServer(facilitatorClient)
     .register(EVM_NETWORK, new ExactEvmScheme())
-    .register(EVM_NETWORK, new UptoEvmScheme())
-    .register(EVM_NETWORK, new BatchSettlementEvmScheme())
     .register(SOLANA_NETWORK, new ExactSvmScheme());
 
 app.get("/api/health", (_req, res) => {
@@ -72,7 +68,7 @@ app.get("/api/health", (_req, res) => {
 app.use(
     paymentMiddleware(
         {
-            "GET /api/quote": {
+            "POST /api/quote": {
                 accepts: [
                     {
                         scheme: "exact",
@@ -89,28 +85,6 @@ app.use(
                 ],
                 description: "A single random market quote",
                 mimeType: "application/json"
-            },
-
-            "GET /api/generate": {
-                accepts: {
-                    scheme: "upto",
-                    price: "$0.05",
-                    network: EVM_NETWORK,
-                    payTo: EVM_PAY_TO
-                },
-                description: "AI text generation — billed by tokens actually generated",
-                mimeType: "application/json"
-            },
-
-            "GET /api/tick": {
-                accepts: {
-                    scheme: "batch-settlement",
-                    price: "$0.0005",
-                    network: EVM_NETWORK,
-                    payTo: EVM_PAY_TO
-                },
-                description: "One metered tick, redeemed later as part of a batch",
-                mimeType: "application/json"
             }
         },
         resourceServer
@@ -125,40 +99,14 @@ const QUOTES = [
     "The four most dangerous words: this time it's different.",
 ];
 
-app.get("/api/quote", (_req, res) => {
+app.post("/api/quote", (_req, res) => {
     const quote: string = QUOTES[Math.floor(Math.random() * QUOTES.length)];
 
     res.json({quote, paidAt: new Date().toISOString()});
-});
-
-app.get("/api/generate", (_req, res) => {
-    const maxAmountAtomic: number = 50_000;
-    const actualUsage: number = Math.floor(Math.random() * (maxAmountAtomic + 1));
-    const tokens: number = Math.floor(actualUsage / 50) + 10;
-
-    setSettlementOverrides(res, {amount: String(actualUsage)});
-
-    res.json({
-        result: `Here is your generated text (${tokens} tokens)...`,
-        usage: {
-            authorizedMaxAtomic: String(maxAmountAtomic),
-            actualChargedAtomic: String(actualUsage),
-            tokens
-        }
-    });
-});
-
-app.get("/api/tick", (_req, res) => {
-    res.json({
-        tick: Date.now(),
-        note: "Settled later, batched with other ticks from this channel."
-    });
 });
 
 app.listen(PORT, () => {
     console.log(`💸 x402 resource server listening on http://localhost:${PORT}`);
     console.log(`   Free:   GET /api/health`);
     console.log(`   exact:  GET /api/quote     ($0.001 EVM or Solana USDC)`);
-    console.log(`   upto:   GET /api/generate  (up to $0.05 EVM, settled by usage)`);
-    console.log(`   batch:  GET /api/tick      (up to $0.0005 EVM, redeemed in batches)`);
 });

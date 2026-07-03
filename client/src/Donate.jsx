@@ -1,10 +1,7 @@
 import {
     AlertCircle,
-    ArrowLeft,
     ArrowRight,
-    Check,
     ChevronDown,
-    Copy,
     Loader2,
     LogOut,
     Plus,
@@ -18,6 +15,22 @@ import {
     useRef,
     useState
 } from "react";
+import {connectPhantom, toSolanaSigner} from "./lib/solanaSigner.js";
+import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
+import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
+
+// Mirrors App.jsx's RESOURCE_URL / humanizeError so the donation flow talks
+// to the same x402 resource server using the same connection & payment logic.
+const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:4021";
+
+function humanizeError(err) {
+    const message = err?.message ?? String(err);
+
+    if (/user rejected|user denied/i.test(message)) return "Signature request was cancelled in your wallet.";
+    if (/insufficient/i.test(message)) return "Wallet doesn't have enough USDC.";
+
+    return message;
+}
 
 const NETWORKS = [
     {
@@ -362,11 +375,12 @@ export default function Donate() {
     const [amount, setAmount] = useState("25");
     const [activeChip, setActiveChip] = useState(25);
     const [message, setMessage] = useState("");
-    const [revealed, setRevealed] = useState(false);
-    const [copied, setCopied] = useState(false);
     const [wallet, setWallet] = useState({evm: null, svm: null});
     const [walletConnecting, setWalletConnecting] = useState(false);
     const [walletError, setWalletError] = useState({evm: "", svm: ""});
+    const [sending, setSending] = useState(false);
+    const [sendError, setSendError] = useState("");
+    const [sendResult, setSendResult] = useState(null);
 
     const network = NETWORKS.find((n) => n.id === networkId);
     const coinList = useMemo(
@@ -391,33 +405,13 @@ export default function Donate() {
 
     async function connectEvmWallet() {
         setWalletError((e) => ({...e, evm: ""}));
-
-        if (typeof window === "undefined" || !window.ethereum) {
-            setWalletError((e) => ({
-                ...e,
-                evm: "No EVM wallet found. Install MetaMask or another browser wallet.",
-            }));
-            return;
-        }
+        setWalletConnecting(true);
 
         try {
-            setWalletConnecting(true);
-
-            const accounts = await window.ethereum.request({method: "eth_requestAccounts"});
-
-            if (network.chainType === "evm") {
-                await window.ethereum
-                    .request({method: "wallet_switchEthereumChain", params: [{chainId: network.evmChainId}]})
-                    .catch(() => {
-                    });
-            }
-
-            setWallet((w) => ({...w, evm: accounts[0]}));
+            const {walletClient, address} = await connectEvmWalletLib();
+            setWallet((w) => ({...w, evm: {walletClient, address}}));
         } catch (err) {
-            setWalletError((e) => ({
-                ...e,
-                evm: err?.code === 4001 ? "Connection request was rejected." : "Couldn't connect to the wallet.",
-            }));
+            setWalletError((e) => ({...e, evm: humanizeError(err)}));
         } finally {
             setWalletConnecting(false);
         }
@@ -425,31 +419,25 @@ export default function Donate() {
 
     async function connectSvmWallet() {
         setWalletError((e) => ({...e, svm: ""}));
-
-        if (typeof window === "undefined" || !window.solana || !window.solana.isPhantom) {
-            setWalletError((e) => ({...e, svm: "No Solana wallet found. Install Phantom."}));
-            return;
-        }
+        setWalletConnecting(true);
 
         try {
-            setWalletConnecting(true);
-
-            const resp = await window.solana.connect();
-            setWallet((w) => ({...w, svm: resp.publicKey.toString()}));
+            const conn = await connectPhantom();
+            setWallet((w) => ({...w, svm: conn}));
         } catch (err) {
-            setWalletError((e) => ({
-                ...e,
-                svm: err?.code === 4001 ? "Connection request was rejected." : "Couldn't connect to the wallet.",
-            }));
+            setWalletError((e) => ({...e, svm: humanizeError(err)}));
         } finally {
             setWalletConnecting(false);
         }
     }
 
-    function disconnectWallet(type) {
-        if (type === "svm" && typeof window !== "undefined" && window.solana?.disconnect) {
-            window.solana.disconnect().catch(() => {
-            });
+    async function disconnectWallet(type) {
+        if (type === "svm") {
+            try {
+                await wallet.svm?.adapter?.disconnect?.();
+            } catch {
+                /* ignore */
+            }
         }
 
         setWallet((w) => ({...w, [type]: null}));
@@ -479,17 +467,57 @@ export default function Donate() {
     const numericAmount = Number(amount);
     const canDonate = numericAmount > 0 && Number.isFinite(numericAmount);
 
-    const handleCopy = useCallback(() => {
-        const text = coin.custom ? coin.address : network.address;
-        if (navigator?.clipboard?.writeText) {
-            navigator.clipboard.writeText(text).catch(() => {
+    const isEvm = network.chainType === "evm";
+    const walletConn = isEvm ? wallet.evm : wallet.svm;
+    const walletAddress = isEvm ? walletConn?.address : walletConn?.pubkey;
+
+    // Same payment logic as App.jsx's handleSend: build an x402 payment-aware
+    // fetch for the connected wallet and hit the (402-protected) donate endpoint.
+    const handleDonate = useCallback(async () => {
+        if (!walletConn || !canDonate) return;
+
+        setSending(true);
+        setSendError("");
+        setSendResult(null);
+
+        const svmSigner = !isEvm && walletConn
+            ? toSolanaSigner(walletConn.provider, walletConn.pubkey)
+            : undefined;
+
+        const {fetchWithPayment, httpClient} = createPaymentFetch({
+            walletClient: isEvm ? walletConn.walletClient : undefined,
+            address: isEvm ? walletConn.address : undefined,
+            svmSigner,
+        });
+
+        try {
+            const url = `${RESOURCE_URL}/api/quote`;
+            const response = await fetchWithPayment(url, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    coin: coin.symbol,
+                    network: network.id,
+                    message: message.trim() || undefined
+                }),
             });
+
+            if (!response.ok) {
+                const text = await response.text().catch(() => "");
+
+                throw new Error(text || `Request failed with status ${response.status}`);
+            }
+
+            const data = await response.json();
+            const settlement = readSettlement(httpClient, response);
+
+            setSendResult({data, settlement});
+        } catch (err) {
+            setSendError(humanizeError(err));
+        } finally {
+            setSending(false);
         }
-
-        setCopied(true);
-
-        setTimeout(() => setCopied(false), 1800);
-    }, [coin, network]);
+    }, [walletConn, isEvm, canDonate, numericAmount, coin, network, message]);
 
     return (
         <div className="ndp-root">
@@ -515,11 +543,11 @@ export default function Donate() {
                         </div>
                         <div className="ndp-perf"/>
                         <div className="ndp-receipt-rows">
-                            {wallet[network.chainType] && (
+                            {walletAddress && (
                                 <div className="ndp-receipt-row">
                                     <span className="ndp-receipt-key">From</span>
                                     <span
-                                        className="ndp-receipt-val">{shorten(wallet[network.chainType])}</span>
+                                        className="ndp-receipt-val">{shorten(walletAddress)}</span>
                                 </div>
                             )}
                             <div className="ndp-receipt-row">
@@ -550,124 +578,128 @@ export default function Donate() {
 
                 {/* -------- Right: form card -------- */}
                 <div className="ndp-card">
-                    {!revealed ? (
+                    <h2 className="ndp-card-title">
+                        {sendResult ? "Donation sent" : "Make a donation"}
+                    </h2>
+                    <p className="ndp-card-sub">
+                        {sendResult
+                            ? "Thank you — your donation has settled on-chain."
+                            : "Choose a network and asset, then set an amount."}
+                    </p>
+
+                    <div className="ndp-row-2">
+                        <NetworkDropdown networks={NETWORKS} value={networkId} onChange={handleNetworkChange}/>
+                        <CoinDropdown
+                            coins={coinList}
+                            value={coin.symbol}
+                            onChange={setCoinSymbol}
+                            onAddCustom={handleAddCustomToken}
+                            accent={network.accent}
+                        />
+                    </div>
+
+                    <WalletConnect
+                        chainType={network.chainType}
+                        evmChainId={network.evmChainId}
+                        address={walletAddress || null}
+                        connecting={walletConnecting}
+                        error={walletError[network.chainType] || ""}
+                        onConnect={network.chainType === "evm" ? connectEvmWallet : connectSvmWallet}
+                        onDisconnect={() => disconnectWallet(network.chainType)}
+                    />
+
+                    <label className="ndp-label">Amount</label>
+                    <div className="ndp-amount-grid">
+                        {AMOUNTS.map((v) => (
+                            <button
+                                key={v}
+                                type="button"
+                                className={`ndp-chip ${activeChip === v ? "ndp-chip-active" : ""}`}
+                                onClick={() => handleChip(v)}
+                            >
+                                ${v}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="ndp-amount-input-wrap">
+                        <span className="ndp-amount-currency">$</span>
+                        <input
+                            className="ndp-amount-input"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={amount}
+                            onChange={(e) => handleManualAmount(e.target.value)}
+                            aria-label="Custom amount in dollars"
+                        />
+                        <span className="ndp-amount-suffix">USD equiv.</span>
+                    </div>
+
+                    <label className="ndp-label">Message (optional)</label>
+                    <textarea
+                        className="ndp-textarea"
+                        placeholder="Say a few words to go with your donation..."
+                        value={message}
+                        maxLength={200}
+                        onChange={(e) => setMessage(e.target.value)}
+                    />
+                    <p className="ndp-char-count">{message.length}/200</p>
+
+                    {!sendResult && (
+                        <button
+                            type="button"
+                            className="ndp-submit"
+                            disabled={!canDonate || !walletAddress || sending}
+                            onClick={handleDonate}
+                        >
+                            {sending ? (
+                                <>
+                                    <Loader2 size={16} className="ndp-spin"/>
+                                    Processing…
+                                </>
+                            ) : (
+                                <>
+                                    Donate {canDonate ? `$${numericAmount.toLocaleString()}` : ""} in {coin.symbol}
+                                    <ArrowRight size={17}/>
+                                </>
+                            )}
+                        </button>
+                    )}
+
+                    {!walletAddress && !sendResult && (
+                        <p className="ndp-wallet-error">
+                            <AlertCircle size={13}/>
+                            Connect a {network.name} wallet to send this donation.
+                        </p>
+                    )}
+
+                    {sendError && (
+                        <p className="ndp-wallet-error">
+                            <AlertCircle size={13}/>
+                            {sendError}
+                        </p>
+                    )}
+
+                    {sendResult && (
                         <>
-                            <h2 className="ndp-card-title">Make a donation</h2>
-                            <p className="ndp-card-sub">Choose a network and asset, then set an amount.</p>
-
-                            <div className="ndp-row-2">
-                                <NetworkDropdown networks={NETWORKS} value={networkId} onChange={handleNetworkChange}/>
-                                <CoinDropdown
-                                    coins={coinList}
-                                    value={coin.symbol}
-                                    onChange={setCoinSymbol}
-                                    onAddCustom={handleAddCustomToken}
-                                    accent={network.accent}
-                                />
-                            </div>
-
-                            <WalletConnect
-                                chainType={network.chainType}
-                                evmChainId={network.evmChainId}
-                                address={wallet[network.chainType] || null}
-                                connecting={walletConnecting}
-                                error={walletError[network.chainType] || ""}
-                                onConnect={network.chainType === "evm" ? connectEvmWallet : connectSvmWallet}
-                                onDisconnect={() => disconnectWallet(network.chainType)}
-                            />
-
-                            <label className="ndp-label">Amount</label>
-                            <div className="ndp-amount-grid">
-                                {AMOUNTS.map((v) => (
-                                    <button
-                                        key={v}
-                                        type="button"
-                                        className={`ndp-chip ${activeChip === v ? "ndp-chip-active" : ""}`}
-                                        onClick={() => handleChip(v)}
-                                    >
-                                        ${v}
-                                    </button>
-                                ))}
-                            </div>
-
-                            <div className="ndp-amount-input-wrap">
-                                <span className="ndp-amount-currency">$</span>
-                                <input
-                                    className="ndp-amount-input"
-                                    inputMode="decimal"
-                                    placeholder="0.00"
-                                    value={amount}
-                                    onChange={(e) => handleManualAmount(e.target.value)}
-                                    aria-label="Custom amount in dollars"
-                                />
-                                <span className="ndp-amount-suffix">USD equiv.</span>
-                            </div>
-
-                            <label className="ndp-label">Message (optional)</label>
-                            <textarea
-                                className="ndp-textarea"
-                                placeholder="Say a few words to go with your donation..."
-                                value={message}
-                                maxLength={200}
-                                onChange={(e) => setMessage(e.target.value)}
-                            />
-                            <p className="ndp-char-count">{message.length}/200</p>
+                            <p className="ndp-reveal-note">
+                                Settled on {network.name}
+                                {sendResult.settlement?.transaction && (
+                                    <> — tx {shorten(sendResult.settlement.transaction, 10, 8)}</>
+                                )}
+                                {message.trim() ? " — your note was saved with this donation." : "."}
+                            </p>
 
                             <button
                                 type="button"
-                                className="ndp-submit"
-                                disabled={!canDonate}
-                                onClick={() => setRevealed(true)}
+                                className="ndp-btn-secondary"
+                                onClick={() => {
+                                    setSendResult(null);
+                                    setSendError("");
+                                }}
                             >
-                                Donate {canDonate ? `$${numericAmount.toLocaleString()}` : ""} in {coin.symbol}
-                                <ArrowRight size={17}/>
+                                Make another donation
                             </button>
-                        </>
-                    ) : (
-                        <>
-                            <div className="ndp-reveal-head">
-                                <button className="ndp-back-btn" onClick={() => setRevealed(false)}
-                                        aria-label="Back to form">
-                                    <ArrowLeft size={16}/>
-                                </button>
-                                <span className="ndp-reveal-summary">
-                                    Sending <strong>${numericAmount.toLocaleString()}</strong> in{" "}
-                                    <strong>{coin.symbol}</strong> on <strong>{network.name}</strong>
-                                    {wallet[network.chainType] && (
-                                        <> from <strong>{shorten(wallet[network.chainType])}</strong></>
-                                    )}
-                                </span>
-                            </div>
-
-                            <h2 className="ndp-card-title">Send to this address</h2>
-                            <p className="ndp-card-sub">
-                                Copy the address below and send from any {network.name} wallet.
-                            </p>
-
-                            <div className="ndp-address-box">
-                                <span className="ndp-address-icon">
-                                    <Wallet size={18}/>
-                                </span>
-
-                                <span className="ndp-address-text">
-                                    {coin.custom ? coin.address : network.address}
-                                </span>
-
-                                <button
-                                    className={`ndp-copy-btn ${copied ? "ndp-copied" : ""}`}
-                                    onClick={handleCopy}
-                                    aria-label="Copy address"
-                                    type="button"
-                                >
-                                    {copied ? <Check size={16}/> : <Copy size={16}/>}
-                                </button>
-                            </div>
-
-                            <p className="ndp-reveal-note">
-                                Double-check the network before sending - assets sent on the wrong chain
-                                can't be recovered. Once your transaction confirms, no further action is needed
-                                {message.trim() ? " — your note has been saved with this donation." : "."}
-                            </p>
                         </>
                     )}
                 </div>
