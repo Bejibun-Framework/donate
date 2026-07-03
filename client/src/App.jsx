@@ -18,7 +18,7 @@ const BODY_TYPES = ["json", "form-data", "x-www-form-urlencoded", "raw", "none"]
 function shorten(value, lead = 5, tail = 5) {
     if (!value) return "";
 
-    return value.length > lead + tail ? `${value.slice(0, lead)}…${value.slice(-tail)}` : value;
+    return value.length > lead + tail ? `${value.slice(0, lead)}...${value.slice(-tail)}` : value;
 }
 
 function humanizeError(err) {
