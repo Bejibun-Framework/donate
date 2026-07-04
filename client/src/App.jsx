@@ -25,8 +25,6 @@ import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
 import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
 import {base} from "viem/chains";
 
-// Mirrors App.jsx's RESOURCE_URL / humanizeError so the donation flow talks
-// to the same x402 resource server using the same connection & payment logic.
 const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:8787";
 
 function humanizeError(err) {
@@ -136,10 +134,7 @@ function NetworkDropdown({networks, value, onChange}) {
             >
                 <span className="ndp-select-left">
                     <span className="ndp-menu-icon" aria-hidden="true">
-                        <span
-                            className="ndp-dot"
-                            style={{background: current.accent}}
-                        />
+                        <span className="ndp-dot" style={{background: current.accent}}/>
                     </span>
                     <span className="ndp-select-text">{current.name}</span>
                 </span>
@@ -207,7 +202,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
             return;
         }
 
-        onAddCustom({symbol: sym, name: `${sym} · custom token`, address: addr, custom: true});
+        onAddCustom({symbol: sym, name: `${sym} · custom token`, contract: addr, custom: true});
 
         closeAll();
     }
@@ -277,8 +272,12 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
                         <form className="ndp-custom-form" onSubmit={submitCustom}>
                             <div className="ndp-custom-form-head">
                                 <span>Add custom token</span>
-                                <button type="button" className="ndp-icon-btn" onClick={() => setAddingCustom(false)}
-                                        aria-label="Cancel">
+                                <button
+                                    type="button"
+                                    className="ndp-icon-btn"
+                                    onClick={() => setAddingCustom(false)}
+                                    aria-label="Cancel"
+                                >
                                     <X size={14}/>
                                 </button>
                             </div>
@@ -522,8 +521,6 @@ export default function App() {
     const walletConn = isEvm ? wallet.evm : wallet.svm;
     const walletAddress = isEvm ? walletConn?.address : walletConn?.pubkey;
 
-    // Same payment logic as App.jsx's handleSend: build an x402 payment-aware
-    // fetch for the connected wallet and hit the (402-protected) donate endpoint.
     const handleDonate = useCallback(async () => {
         if (!walletConn || !canDonate) return;
 
@@ -583,7 +580,7 @@ export default function App() {
         } finally {
             setSending(false);
         }
-    }, [walletConn, isEvm, canDonate, numericAmount, coin, network, message]);
+    }, [walletConn, isEvm, canDonate, coin, network, walletAddress, message]);
 
     return (
         <div className="ndp-root">
@@ -612,8 +609,7 @@ export default function App() {
                             {walletAddress && (
                                 <div className="ndp-receipt-row">
                                     <span className="ndp-receipt-key">From</span>
-                                    <span
-                                        className="ndp-receipt-val">{shorten(walletAddress)}</span>
+                                    <span className="ndp-receipt-val">{shorten(walletAddress)}</span>
                                 </div>
                             )}
                             <div className="ndp-receipt-row">

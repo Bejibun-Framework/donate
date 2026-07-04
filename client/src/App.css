@@ -2,6 +2,7 @@
 
 body {
     margin: 0;
+    overflow-x: hidden;
 }
 
 .ndp-root {
@@ -19,6 +20,7 @@ body {
     var(--ink);
     color: var(--ivory);
     min-height: 100vh;
+    min-height: 100dvh;
     padding: clamp(20px, 5vw, 64px);
     box-sizing: border-box;
     position: relative;
@@ -39,6 +41,7 @@ body {
     background-image: linear-gradient(rgba(238, 234, 222, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(238, 234, 222, 0.035) 1px, transparent 1px);
     background-size: 42px 42px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 70%);
     mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 70%);
     pointer-events: none;
 }
@@ -48,18 +51,33 @@ body {
     max-width: 1080px;
     margin: 0 auto;
     display: grid;
-    grid-template-columns: 1.05fr 1fr;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
     gap: clamp(28px, 5vw, 64px);
     align-items: start;
 }
 
-@media (max-width: 880px) {
+/* Desktop: two-column layout (default styles above cover this, >1024px) */
+
+/* Tablet: still plenty of room, just tighten the grid ratio a touch */
+@media (max-width: 1024px) {
     .ndp-shell {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
 }
 
-/* ---------- Left column ---------- */
+/* Tablet portrait / large mobile: stack into a single column,
+   in natural document order (narrative on top, form below) —
+   matching how left/right sit in the desktop layout. */
+@media (max-width: 880px) {
+    .ndp-shell {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ndp-receipt {
+        max-width: none;
+    }
+}
+
 .ndp-left {
     padding-top: clamp(8px, 3vw, 28px);
 }
@@ -107,7 +125,6 @@ body {
     margin: 0 0 40px;
 }
 
-/* ---------- Receipt (signature element) ---------- */
 .ndp-receipt {
     background: linear-gradient(180deg, var(--panel), var(--card));
     border: 1px solid var(--card-border);
@@ -143,7 +160,6 @@ body {
     position: relative;
     height: 1px;
     border-top: 1.5px dashed rgba(238, 234, 222, 0.18);
-    margin: 0 0;
 }
 
 .ndp-perf::before, .ndp-perf::after {
@@ -210,6 +226,12 @@ body {
     max-width: 220px;
 }
 
+@media (max-width: 880px) {
+    .ndp-receipt-note {
+        max-width: 60%;
+    }
+}
+
 .ndp-receipt-bottom {
     padding: 18px 24px 22px;
     font-family: 'IBM Plex Mono', monospace;
@@ -221,7 +243,6 @@ body {
     text-align: center;
 }
 
-/* ---------- Right column: form card ---------- */
 .ndp-card {
     background: var(--card);
     border: 1px solid var(--card-border);
@@ -245,14 +266,15 @@ body {
 
 .ndp-row-2 {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 12px;
     margin-bottom: 20px;
 }
 
+/* Mobile: stack network + asset pickers */
 @media (max-width: 480px) {
     .ndp-row-2 {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
@@ -307,6 +329,7 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
 }
 
 .ndp-select-muted {
@@ -416,10 +439,13 @@ body {
 }
 
 .ndp-menu-add {
+    height: auto;
     color: var(--teal);
     border-top: 1px solid rgba(238, 234, 222, 0.08);
     margin-top: 4px;
-    padding-top: 12px;
+    padding: 12px 10px;
+    justify-content: center;
+    text-align: center;
 }
 
 .ndp-custom-form {
@@ -490,16 +516,8 @@ body {
     cursor: pointer;
 }
 
-/* ---------- Wallet connect ---------- */
 .ndp-wallet-field {
     margin-bottom: 20px;
-}
-
-.ndp-wallet-hint {
-    font-size: 12.5px;
-    color: var(--muted);
-    line-height: 1.55;
-    margin: 0;
 }
 
 .ndp-connect-btn {
@@ -574,10 +592,9 @@ body {
     }
 }
 
-/* ---------- Amount ---------- */
 .ndp-amount-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     margin-bottom: 12px;
 }
@@ -593,6 +610,20 @@ body {
     font-weight: 500;
     cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+/* Mobile: taller chips for comfortable tapping, and drop to 2 columns
+   on very narrow phones so labels never feel cramped */
+@media (max-width: 600px) {
+    .ndp-chip {
+        padding: 13px 0;
+    }
+}
+
+@media (max-width: 360px) {
+    .ndp-amount-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 .ndp-chip:hover {
@@ -703,91 +734,6 @@ body {
     opacity: 0.4;
     cursor: not-allowed;
     box-shadow: none;
-}
-
-/* ---------- Reveal panel ---------- */
-.ndp-reveal-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 18px;
-}
-
-.ndp-back-btn {
-    background: transparent;
-    border: 1px solid var(--card-border);
-    color: var(--muted);
-    border-radius: 8px;
-    padding: 6px;
-    display: flex;
-    cursor: pointer;
-}
-
-.ndp-back-btn:hover {
-    color: var(--ivory);
-    border-color: rgba(238, 234, 222, 0.25);
-}
-
-.ndp-reveal-summary {
-    font-size: 13.5px;
-    color: var(--muted);
-}
-
-.ndp-reveal-summary strong {
-    color: var(--ivory);
-    font-weight: 600;
-}
-
-.ndp-address-box {
-    background: var(--panel);
-    border: 1px dashed rgba(238, 234, 222, 0.22);
-    border-radius: 12px;
-    padding: 16px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 18px 0 22px;
-}
-
-.ndp-address-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
-    background: rgba(95, 227, 184, 0.12);
-    color: var(--teal);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.ndp-address-text {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    color: var(--ivory);
-    word-break: break-all;
-    line-height: 1.5;
-}
-
-.ndp-copy-btn {
-    margin-left: auto;
-    flex-shrink: 0;
-    background: transparent;
-    border: 1px solid var(--card-border);
-    color: var(--muted);
-    border-radius: 8px;
-    padding: 8px;
-    cursor: pointer;
-    display: flex;
-}
-
-.ndp-copy-btn:hover {
-    color: var(--ivory);
-}
-
-.ndp-copy-btn.ndp-copied {
-    color: var(--teal);
-    border-color: var(--teal);
 }
 
 .ndp-reveal-note {
