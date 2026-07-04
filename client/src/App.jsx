@@ -1,3 +1,4 @@
+import {Connection, PublicKey} from "@solana/web3.js";
 import {
     AlertCircle,
     ArrowRight,
@@ -23,9 +24,11 @@ import {
 } from "./lib/solanaSigner.js";
 import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
 import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
+import {getAddress} from "viem";
 import {base} from "viem/chains";
 
 const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:8787";
+const SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC || "https://api.mainnet-beta.solana.com";
 
 function humanizeError(err) {
     const message = err?.message ?? String(err);
@@ -43,6 +46,8 @@ const NETWORKS = [
         nativeCurrency: base.nativeCurrency,
         accent: "#8CA3F0",
         chainType: "evm",
+        trustWalletId: "base", // Trust Wallet assets repo blockchain slug
+        coinGeckoPlatform: "base", // CoinGecko asset platform id
         coins: [
             {
                 contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -62,6 +67,8 @@ const NETWORKS = [
         },
         accent: "#5FE3B8",
         chainType: "svm",
+        trustWalletId: "solana", // Trust Wallet assets repo blockchain slug
+        coinGeckoPlatform: "solana", // CoinGecko asset platform id
         coins: [
             {
                 contract: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -80,6 +87,143 @@ const SOL_LABELS = {
     metamask: "MetaMask",
     walletconnect: "WalletConnect"
 };
+
+// ---------------------------------------------------------------------------
+// Token logo resolution
+//
+//   SOLANA (primary: on-chain) — most SPL tokens register metadata with the
+//   Metaplex Token Metadata program. That on-chain account holds a `uri`
+//   pointing to an off-chain JSON file (IPFS/Arweave/HTTP) with an `image`
+//   field. This is authoritative straight from the chain and has no indexer
+//   lag — it works the moment a token's mint authority registers metadata.
+//
+//   Trust Wallet's curated asset repo (fallback for Solana, primary for
+//   EVM) — keyed by chain + checksummed contract address. It's community
+//   maintained and PR-gated, so it never serves a generic placeholder in
+//   place of a missing logo like some aggregators do — you get the real
+//   logo or a clean 404, nothing in between. Its tradeoff is coverage lag
+//   for brand-new tokens.
+//
+//   CoinGecko's per-contract endpoint (final fallback) — broader (if still
+//   not universal) coverage, and also returns real submitted images rather
+//   than placeholders.
+// ---------------------------------------------------------------------------
+
+const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+let solanaConnection = null;
+
+function getSolanaConnection() {
+    if (!solanaConnection) solanaConnection = new Connection(SOLANA_RPC_URL, "confirmed");
+
+    return solanaConnection;
+}
+
+function getMetadataPda(mint) {
+    return PublicKey.findProgramAddressSync(
+        [Buffer.from("metadata"), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+        METADATA_PROGRAM_ID
+    )[0];
+}
+
+// Manually decodes just the `uri` field out of a Metaplex Metadata account.
+// Layout (relevant prefix): 1 byte key + 32 byte update_authority + 32 byte
+// mint, then borsh-encoded strings for name, symbol, uri (each a 4-byte LE
+// length prefix followed by the UTF-8 bytes).
+function readMetadataUri(data) {
+    let offset = 1 + 32 + 32;
+
+    function readString() {
+        const len = data.readUInt32LE(offset);
+        offset += 4;
+        const str = data.slice(offset, offset + len).toString("utf8").replace(/\0/g, "").trim();
+        offset += len;
+
+        return str;
+    }
+
+    readString(); // name (unused)
+    readString(); // symbol (unused)
+
+    return readString() || null; // uri
+}
+
+async function fetchSolanaOnChainLogo(contract) {
+    try {
+        const mint = new PublicKey(contract);
+        const pda = getMetadataPda(mint);
+        const accountInfo = await getSolanaConnection().getAccountInfo(pda);
+
+        if (!accountInfo) return null;
+
+        const uri = readMetadataUri(accountInfo.data);
+        if (!uri) return null;
+
+        const res = await fetch(uri);
+        if (!res.ok) return null;
+
+        const json = await res.json();
+
+        return json?.image ?? null;
+    } catch {
+        return null;
+    }
+}
+
+// EVM addresses need EIP-55 checksumming to match Trust Wallet's repo paths
+// exactly; Solana (base58) addresses are used as-is and must not be altered.
+function checksummedForRepo(contract, network) {
+    if (network.chainType !== "evm") return contract;
+
+    try {
+        return getAddress(contract);
+    } catch {
+        return contract;
+    }
+}
+
+function trustWalletLogoUrl(contract, network) {
+    const address = checksummedForRepo(contract, network);
+
+    return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${network.trustWalletId}/assets/${address}/logo.png`;
+}
+
+async function fetchCoinGeckoLogo(contract, network) {
+    try {
+        const address = network.chainType === "evm" ? contract.toLowerCase() : contract;
+        const res = await fetch(`https://api.coingecko.com/api/v3/coins/${network.coinGeckoPlatform}/contract/${address}`);
+
+        if (!res.ok) return null;
+
+        const data = await res.json();
+
+        return data?.image?.small || data?.image?.thumb || data?.image?.large || null;
+    } catch {
+        return null;
+    }
+}
+
+// Cached final result per (network, contract) so repeated renders never
+// re-run the lookup chain. `null` means "checked everywhere, nothing found".
+const logoCache = new Map(); // "trustWalletId:contract(lowercased)" -> string url | null
+
+async function resolveLogo(coin, network) {
+    const key = `${network.trustWalletId}:${coin.contract.toLowerCase()}`;
+    if (logoCache.has(key)) return logoCache.get(key);
+
+    let url = null;
+
+    if (network.chainType === "svm") {
+        url = await fetchSolanaOnChainLogo(coin.contract);
+    }
+
+    if (!url) {
+        url = await fetchCoinGeckoLogo(coin.contract, network);
+    }
+
+    logoCache.set(key, url);
+    
+    return url;
+}
 
 function useOutsideClose(open, setOpen) {
     const ref = useRef(null);
@@ -115,6 +259,84 @@ function shorten(value, lead = 5, tail = 5) {
     if (!value) return "";
 
     return value.length > lead + tail ? `${value.slice(0, lead)}...${value.slice(-tail)}` : value;
+}
+
+// Renders a token's real logo in tiers:
+//   1. Trust Wallet's direct repo image — fast, just an <img src>, cleanly
+//      404s if missing (no external fetch call needed to try it).
+//   2. On-chain Solana metadata (SVM only) or CoinGecko's contract API
+//      (secondary source for both chains) — resolved once and cached.
+//   3. Two-letter initials avatar if nothing above worked.
+function CoinAvatar({coin, network, accent, size = 22}) {
+    const cacheKey = `${network.trustWalletId}:${coin.contract.toLowerCase()}`;
+
+    // "direct" -> trying the Trust Wallet repo image path
+    // "resolved" -> direct failed; using whatever resolveLogo() finds
+    // "none" -> nothing worked, show initials
+    const [stage, setStage] = useState("direct");
+    const [resolvedUrl, setResolvedUrl] = useState(() => logoCache.get(cacheKey));
+
+    useEffect(() => {
+        setStage("direct");
+        setResolvedUrl(logoCache.get(cacheKey));
+    }, [cacheKey]);
+
+    useEffect(() => {
+        if (stage !== "resolved") return;
+        if (logoCache.has(cacheKey)) return;
+
+        let cancelled = false;
+
+        resolveLogo(coin, network).then((url) => {
+            if (!cancelled) setResolvedUrl(url);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [stage, cacheKey, coin, network]);
+
+    if (stage === "direct") {
+        return (
+            <span
+                className="ndp-coin-avatar ndp-coin-avatar-img"
+                style={{borderColor: accent, width: size, height: size}}
+            >
+                <img
+                    src={trustWalletLogoUrl(coin.contract, network)}
+                    alt={coin.symbol}
+                    width={size}
+                    height={size}
+                    loading="lazy"
+                    onError={() => setStage("resolved")}
+                />
+            </span>
+        );
+    }
+
+    if (stage === "resolved" && resolvedUrl) {
+        return (
+            <span
+                className="ndp-coin-avatar ndp-coin-avatar-img"
+                style={{borderColor: accent, width: size, height: size}}
+            >
+                <img
+                    src={resolvedUrl}
+                    alt={coin.symbol}
+                    width={size}
+                    height={size}
+                    loading="lazy"
+                    onError={() => setResolvedUrl(null)}
+                />
+            </span>
+        );
+    }
+
+    return (
+        <span className="ndp-coin-avatar" style={{borderColor: accent, color: accent}}>
+            {coinInitials(coin.symbol)}
+        </span>
+    );
 }
 
 function NetworkDropdown({networks, value, onChange}) {
@@ -170,7 +392,7 @@ function NetworkDropdown({networks, value, onChange}) {
     );
 }
 
-function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
+function CoinDropdown({coins, value, onChange, onAddCustom, accent, network}) {
     const [open, setOpen] = useState(false);
     const [addingCustom, setAddingCustom] = useState(false);
     const [customSymbol, setCustomSymbol] = useState("");
@@ -218,9 +440,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
                 aria-expanded={open}
             >
                 <span className="ndp-select-left">
-                    <span className="ndp-coin-avatar" style={{borderColor: accent, color: accent}}>
-                        {coinInitials(current.symbol)}
-                    </span>
+                    <CoinAvatar coin={current} network={network} accent={accent}/>
                     <span className="ndp-select-text">
                         {current.symbol}
                         <span className="ndp-select-muted"> · {current.name}</span>
@@ -246,9 +466,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
                                         setOpen(false);
                                     }}
                                 >
-                                    <span className="ndp-coin-avatar" style={{borderColor: accent, color: accent}}>
-                                        {coinInitials(c.symbol)}
-                                    </span>
+                                    <CoinAvatar coin={c} network={network} accent={accent}/>
 
                                     <span className="ndp-select-text">
                                         {c.symbol}
@@ -657,6 +875,7 @@ export default function App() {
                             onChange={setCoinContract}
                             onAddCustom={handleAddCustomToken}
                             accent={network.accent}
+                            network={network}
                         />
                     </div>
 
