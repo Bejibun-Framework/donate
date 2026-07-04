@@ -353,6 +353,15 @@ body {
     flex-shrink: 0;
 }
 
+.ndp-network-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    object-fit: cover;
+    background: var(--panel);
+}
+
 .ndp-coin-avatar {
     width: 24px;
     height: 24px;

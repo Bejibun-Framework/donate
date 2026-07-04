@@ -451,6 +451,36 @@ function CoinAvatar({coin, network, accent, size = 22}) {
     );
 }
 
+function trustWalletChainLogoUrl(network) {
+    return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${network.trustWalletId}/info/logo.png`;
+}
+
+// Renders a network's chain logo (Trust Wallet's curated repo), falling
+// back to the network's accent-colored dot if the image 404s.
+function NetworkIcon({network, size = 20}) {
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        setFailed(false);
+    }, [network.trustWalletId]);
+
+    if (failed) {
+        return <span className="ndp-dot" style={{background: network.accent}}/>;
+    }
+
+    return (
+        <img
+            className="ndp-network-icon"
+            src={trustWalletChainLogoUrl(network)}
+            alt={network.name}
+            width={size}
+            height={size}
+            loading="lazy"
+            onError={() => setFailed(true)}
+        />
+    );
+}
+
 function NetworkDropdown({networks, value, onChange}) {
     const [open, setOpen] = useState(false);
     const ref = useOutsideClose(open, setOpen);
@@ -468,7 +498,7 @@ function NetworkDropdown({networks, value, onChange}) {
             >
                 <span className="ndp-select-left">
                     <span className="ndp-menu-icon" aria-hidden="true">
-                        <span className="ndp-dot" style={{background: current.accent}}/>
+                        <NetworkIcon network={current}/>
                     </span>
                     <span className="ndp-select-text">{current.name}</span>
                 </span>
@@ -491,7 +521,7 @@ function NetworkDropdown({networks, value, onChange}) {
                                 }}
                             >
                                 <span className="ndp-menu-icon" aria-hidden="true">
-                                    <span className="ndp-dot" style={{background: n.accent}}/>
+                                    <NetworkIcon network={n}/>
                                 </span>
                                 <span className="ndp-select-text">{n.name}</span>
                                 <span className="ndp-menu-sub">{n.nativeCurrency.symbol}</span>
