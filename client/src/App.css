@@ -280,6 +280,7 @@ body {
 
 .ndp-field {
     position: relative;
+    margin-bottom: 14px;
 }
 
 .ndp-label {
@@ -516,10 +517,6 @@ body {
     cursor: pointer;
 }
 
-.ndp-wallet-field {
-    margin-bottom: 20px;
-}
-
 .ndp-connect-btn {
     justify-content: center;
     background: transparent;
@@ -643,7 +640,6 @@ body {
     border: 1px solid var(--card-border);
     border-radius: 10px;
     padding: 4px 4px 4px 14px;
-    margin-bottom: 22px;
 }
 
 .ndp-amount-input-wrap:focus-within {

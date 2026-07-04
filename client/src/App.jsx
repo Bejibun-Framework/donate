@@ -24,7 +24,7 @@ import {
 } from "./lib/solanaSigner.js";
 import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
 import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
-import {getAddress} from "viem";
+import {createPublicClient, getAddress, http} from "viem";
 import {base} from "viem/chains";
 
 const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:8787";
@@ -48,6 +48,7 @@ const NETWORKS = [
         chainType: "evm",
         trustWalletId: "base", // Trust Wallet assets repo blockchain slug
         coinGeckoPlatform: "base", // CoinGecko asset platform id
+        viemChain: base, // used to build a read-only public client for custom-token lookups
         coins: [
             {
                 contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -125,11 +126,11 @@ function getMetadataPda(mint) {
     )[0];
 }
 
-// Manually decodes just the `uri` field out of a Metaplex Metadata account.
-// Layout (relevant prefix): 1 byte key + 32 byte update_authority + 32 byte
-// mint, then borsh-encoded strings for name, symbol, uri (each a 4-byte LE
-// length prefix followed by the UTF-8 bytes).
-function readMetadataUri(data) {
+// Manually decodes the `name`, `symbol`, and `uri` fields out of a Metaplex
+// Metadata account. Layout (relevant prefix): 1 byte key + 32 byte
+// update_authority + 32 byte mint, then borsh-encoded strings for name,
+// symbol, uri (each a 4-byte LE length prefix followed by the UTF-8 bytes).
+function readMetadataFields(data) {
     let offset = 1 + 32 + 32;
 
     function readString() {
@@ -141,10 +142,15 @@ function readMetadataUri(data) {
         return str;
     }
 
-    readString(); // name (unused)
-    readString(); // symbol (unused)
+    const name = readString();
+    const symbol = readString();
+    const uri = readString();
 
-    return readString() || null; // uri
+    return {
+        name: name || null,
+        symbol: symbol || null,
+        uri: uri || null
+    };
 }
 
 async function fetchSolanaOnChainLogo(contract) {
@@ -155,7 +161,7 @@ async function fetchSolanaOnChainLogo(contract) {
 
         if (!accountInfo) return null;
 
-        const uri = readMetadataUri(accountInfo.data);
+        const {uri} = readMetadataFields(accountInfo.data);
         if (!uri) return null;
 
         const res = await fetch(uri);
@@ -221,8 +227,114 @@ async function resolveLogo(coin, network) {
     }
 
     logoCache.set(key, url);
-    
+
     return url;
+}
+
+// ---------------------------------------------------------------------------
+// Custom token metadata resolution — given only a contract/mint address,
+// fetch the token's name, symbol, and decimals straight from the chain so
+// the "Add custom token" form only needs one field.
+// ---------------------------------------------------------------------------
+
+const ERC20_READ_ABI = [
+    {name: "name", type: "function", stateMutability: "view", inputs: [], outputs: [{type: "string"}]},
+    {name: "symbol", type: "function", stateMutability: "view", inputs: [], outputs: [{type: "string"}]},
+    {name: "decimals", type: "function", stateMutability: "view", inputs: [], outputs: [{type: "uint8"}]}
+];
+
+const evmPublicClients = new Map(); // chain id -> viem public client, reused across lookups
+
+function getEvmPublicClient(network) {
+    const key = network.viemChain.id;
+
+    if (!evmPublicClients.has(key)) {
+        evmPublicClients.set(key, createPublicClient({chain: network.viemChain, transport: http()}));
+    }
+
+    return evmPublicClients.get(key);
+}
+
+async function fetchEvmTokenMetadata(rawAddress, network) {
+    let address;
+
+    try {
+        address = getAddress(rawAddress.trim());
+    } catch {
+        throw new Error("Enter a valid contract address.");
+    }
+
+    const client = getEvmPublicClient(network);
+
+    let name, symbol, decimals;
+
+    try {
+        [name, symbol, decimals] = await Promise.all([
+            client.readContract({address, abi: ERC20_READ_ABI, functionName: "name"}),
+            client.readContract({address, abi: ERC20_READ_ABI, functionName: "symbol"}),
+            client.readContract({address, abi: ERC20_READ_ABI, functionName: "decimals"})
+        ]);
+    } catch {
+        throw new Error("Couldn't read token details from that contract.");
+    }
+
+    return {contract: address, name, symbol, decimals};
+}
+
+async function fetchSvmTokenMetadata(rawAddress) {
+    let mint;
+
+    try {
+        mint = new PublicKey(rawAddress.trim());
+    } catch {
+        throw new Error("Enter a valid token mint address.");
+    }
+
+    const connection = getSolanaConnection();
+
+    let parsed;
+
+    try {
+        const accountInfo = await connection.getParsedAccountInfo(mint);
+        parsed = accountInfo?.value?.data?.parsed;
+    } catch {
+        throw new Error("Couldn't read that mint from the Solana network.");
+    }
+
+    if (!parsed || parsed.type !== "mint") {
+        throw new Error("That address isn't a token mint.");
+    }
+
+    const decimals = parsed.info.decimals;
+
+    let name = null;
+    let symbol = null;
+
+    try {
+        const pda = getMetadataPda(mint);
+        const metaAccount = await connection.getAccountInfo(pda);
+
+        if (metaAccount) {
+            const fields = readMetadataFields(metaAccount.data);
+            name = fields.name;
+            symbol = fields.symbol;
+        }
+    } catch {
+        // Metadata is optional — fall back to placeholders below.
+    }
+
+    return {
+        contract: mint.toBase58(),
+        name: name || "Unknown token",
+        symbol: symbol || "TOKEN",
+        decimals
+    };
+}
+
+function fetchCustomTokenMetadata(address, network) {
+    return network.chainType === "evm"
+        ? fetchEvmTokenMetadata(address, network)
+        : fetchSvmTokenMetadata(address);
 }
 
 function useOutsideClose(open, setOpen) {
@@ -395,38 +507,65 @@ function NetworkDropdown({networks, value, onChange}) {
 function CoinDropdown({coins, value, onChange, onAddCustom, accent, network}) {
     const [open, setOpen] = useState(false);
     const [addingCustom, setAddingCustom] = useState(false);
-    const [customSymbol, setCustomSymbol] = useState("");
     const [customAddress, setCustomAddress] = useState("");
+    const [fetchingToken, setFetchingToken] = useState(false);
     const [formError, setFormError] = useState("");
     const ref = useOutsideClose(open, setOpen);
     const current = coins.find((c) => c.contract === value) || coins[0];
 
+    // Reset the custom-token form whenever the network changes, since an
+    // address typed for one chain isn't valid on another.
+    useEffect(() => {
+        setAddingCustom(false);
+        setCustomAddress("");
+        setFormError("");
+        setFetchingToken(false);
+    }, [network]);
+
     function closeAll() {
         setOpen(false);
         setAddingCustom(false);
-        setCustomSymbol("");
         setCustomAddress("");
         setFormError("");
+        setFetchingToken(false);
     }
 
-    function submitCustom(e) {
+    async function submitCustom(e) {
         e.preventDefault();
+        setFormError("");
 
-        const sym = customSymbol.trim().toUpperCase();
         const addr = customAddress.trim();
 
-        if (!sym) {
-            setFormError("Enter a token symbol.");
-            return;
-        }
-        if (!/^0x[a-fA-F0-9]{6,40}$/.test(addr)) {
-            setFormError("Enter a valid contract address.");
+        if (!addr) {
+            setFormError(network.chainType === "evm" ? "Enter a contract address." : "Enter a token mint address.");
             return;
         }
 
-        onAddCustom({symbol: sym, name: `${sym} · custom token`, contract: addr, custom: true});
+        const alreadyAdded = coins.some((c) => c.contract.toLowerCase() === addr.toLowerCase());
+        if (alreadyAdded) {
+            setFormError("This token is already in the list.");
+            return;
+        }
 
-        closeAll();
+        setFetchingToken(true);
+
+        try {
+            const meta = await fetchCustomTokenMetadata(addr, network);
+
+            onAddCustom({
+                symbol: meta.symbol,
+                name: meta.name,
+                contract: meta.contract,
+                decimals: meta.decimals,
+                custom: true
+            });
+
+            closeAll();
+        } catch (err) {
+            setFormError(humanizeError(err));
+        } finally {
+            setFetchingToken(false);
+        }
     }
 
     return (
@@ -472,8 +611,6 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent, network}) {
                                         {c.symbol}
                                         <span className="ndp-select-muted"> · {c.name}</span>
                                     </span>
-
-                                    {c.custom && <span className="ndp-menu-sub">custom</span>}
                                 </button>
                             ))}
 
@@ -495,6 +632,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent, network}) {
                                     className="ndp-icon-btn"
                                     onClick={() => setAddingCustom(false)}
                                     aria-label="Cancel"
+                                    disabled={fetchingToken}
                                 >
                                     <X size={14}/>
                                 </button>
@@ -502,23 +640,24 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent, network}) {
 
                             <input
                                 className="ndp-input ndp-input-mono"
-                                placeholder="Symbol, e.g. LINK"
-                                value={customSymbol}
-                                onChange={(e) => setCustomSymbol(e.target.value)}
-                                maxLength={10}
-                            />
-
-                            <input
-                                className="ndp-input ndp-input-mono"
-                                placeholder="Contract address (0x...)"
+                                placeholder={network.chainType === "evm" ? "Contract address (0x...)" : "Token mint address"}
                                 value={customAddress}
                                 onChange={(e) => setCustomAddress(e.target.value)}
+                                disabled={fetchingToken}
+                                autoFocus
                             />
 
                             {formError && <p className="ndp-form-error">{formError}</p>}
 
-                            <button type="submit" className="ndp-btn-secondary">
-                                Add token
+                            <button type="submit" className="ndp-btn-secondary" disabled={fetchingToken}>
+                                {fetchingToken ? (
+                                    <>
+                                        <Loader2 size={14} className="ndp-spin"/>
+                                        Fetching token…
+                                    </>
+                                ) : (
+                                    "Add token"
+                                )}
                             </button>
                         </form>
                     )}
@@ -535,7 +674,7 @@ function WalletConnect({chainType, address, walletKind, connecting, error, onCon
     const kindLabel = isEvm ? "EVM wallet" : "Solana wallet";
 
     return (
-        <div className="ndp-field ndp-wallet-field" ref={ref}>
+        <div className="ndp-field" ref={ref}>
             <label className="ndp-label">Wallet</label>
 
             {address ? (
@@ -867,8 +1006,9 @@ export default function App() {
                             : "Choose a network and asset, then set an amount."}
                     </p>
 
-                    <div className="ndp-row-2">
+                    <div>
                         <NetworkDropdown networks={NETWORKS} value={networkId} onChange={handleNetworkChange}/>
+
                         <CoinDropdown
                             coins={coinList}
                             value={coin.contract}
@@ -876,55 +1016,61 @@ export default function App() {
                             onAddCustom={handleAddCustomToken}
                             accent={network.accent}
                             network={network}
+                            className="ndp-field"
                         />
-                    </div>
 
-                    <WalletConnect
-                        chainType={network.chainType}
-                        address={walletAddress || null}
-                        walletKind={wallet.svm?.kind}
-                        connecting={walletConnecting}
-                        error={walletError[network.chainType] || ""}
-                        onConnect={network.chainType === "evm" ? connectEvmWallet : connectSvmWallet}
-                        onDisconnect={() => disconnectWallet(network.chainType)}
-                    />
-
-                    <label className="ndp-label">Amount</label>
-                    <div className="ndp-amount-grid">
-                        {AMOUNTS.map((v) => (
-                            <button
-                                key={v}
-                                type="button"
-                                className={`ndp-chip ${activeChip === v ? "ndp-chip-active" : ""}`}
-                                onClick={() => handleChip(v)}
-                            >
-                                ${v}
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="ndp-amount-input-wrap">
-                        <span className="ndp-amount-currency">$</span>
-                        <input
-                            className="ndp-amount-input"
-                            inputMode="decimal"
-                            placeholder="0.00"
-                            value={amount}
-                            onChange={(e) => handleManualAmount(e.target.value)}
-                            aria-label="Custom amount in dollars"
+                        <WalletConnect
+                            chainType={network.chainType}
+                            address={walletAddress || null}
+                            walletKind={wallet.svm?.kind}
+                            connecting={walletConnecting}
+                            error={walletError[network.chainType] || ""}
+                            onConnect={network.chainType === "evm" ? connectEvmWallet : connectSvmWallet}
+                            onDisconnect={() => disconnectWallet(network.chainType)}
+                            className="ndp-field"
                         />
-                        <span className="ndp-amount-suffix">USD equiv.</span>
-                    </div>
 
-                    <label className="ndp-label">Message (optional)</label>
-                    <textarea
-                        className="ndp-textarea"
-                        placeholder="Say a few words to go with your donation..."
-                        value={message}
-                        maxLength={200}
-                        onChange={(e) => setMessage(e.target.value)}
-                    />
-                    <p className="ndp-char-count">{message.length}/200</p>
+                        <div className="ndp-field">
+                            <label className="ndp-label">Amount</label>
+                            <div className="ndp-amount-grid">
+                                {AMOUNTS.map((v) => (
+                                    <button
+                                        key={v}
+                                        type="button"
+                                        className={`ndp-chip ${activeChip === v ? "ndp-chip-active" : ""}`}
+                                        onClick={() => handleChip(v)}
+                                    >
+                                        ${v}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="ndp-field ndp-amount-input-wrap">
+                            <span className="ndp-amount-currency">$</span>
+                            <input
+                                className="ndp-amount-input"
+                                inputMode="decimal"
+                                placeholder="0.00"
+                                value={amount}
+                                onChange={(e) => handleManualAmount(e.target.value)}
+                                aria-label="Custom amount in dollars"
+                            />
+                            <span className="ndp-amount-suffix">USD equiv.</span>
+                        </div>
+
+                        <div className="ndp-field">
+                            <label className="ndp-label">Message (optional)</label>
+                            <textarea
+                                className="ndp-textarea"
+                                placeholder="Say a few words to go with your donation..."
+                                value={message}
+                                maxLength={200}
+                                onChange={(e) => setMessage(e.target.value)}
+                            />
+                            <p className="ndp-char-count">{message.length}/200</p>
+                        </div>
+                    </div>
 
                     {!sendResult && (
                         <button
