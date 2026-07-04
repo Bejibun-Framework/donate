@@ -15,7 +15,12 @@ import {
     useRef,
     useState
 } from "react";
-import {connectPhantom, toSolanaSigner} from "./lib/solanaSigner.js";
+import {
+    connectPhantom,
+    connectSolanaMetaMask,
+    connectSolanaWalletConnect,
+    toSolanaSigner
+} from "./lib/solanaSigner.js";
 import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
 import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
 import {base} from "viem/chains";
@@ -72,6 +77,12 @@ const NETWORKS = [
 
 const AMOUNTS = [5, 10, 25, 50, 100, 250];
 
+const SOL_LABELS = {
+    phantom: "Phantom",
+    metamask: "MetaMask",
+    walletconnect: "WalletConnect"
+};
+
 function useOutsideClose(open, setOpen) {
     const ref = useRef(null);
 
@@ -118,17 +129,18 @@ function NetworkDropdown({networks, value, onChange}) {
             <label className="ndp-label">Network</label>
             <button
                 type="button"
-                className="ndp-select-btn"
+                className="ndp-control ndp-select-btn"
                 onClick={() => setOpen((o) => !o)}
                 aria-haspopup="listbox"
                 aria-expanded={open}
             >
                 <span className="ndp-select-left">
-                    <span
-                        className="ndp-dot"
-                        style={{background: current.accent}}
-                        aria-hidden="true"
-                    />
+                    <span className="ndp-menu-icon" aria-hidden="true">
+                        <span
+                            className="ndp-dot"
+                            style={{background: current.accent}}
+                        />
+                    </span>
                     <span className="ndp-select-text">{current.name}</span>
                 </span>
 
@@ -149,7 +161,9 @@ function NetworkDropdown({networks, value, onChange}) {
                                     setOpen(false);
                                 }}
                             >
-                                <span className="ndp-dot" style={{background: n.accent}} aria-hidden="true"/>
+                                <span className="ndp-menu-icon" aria-hidden="true">
+                                    <span className="ndp-dot" style={{background: n.accent}}/>
+                                </span>
                                 <span className="ndp-select-text">{n.name}</span>
                                 <span className="ndp-menu-sub">{n.nativeCurrency.symbol}</span>
                             </button>
@@ -203,7 +217,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
             <label className="ndp-label">Asset</label>
             <button
                 type="button"
-                className="ndp-select-btn"
+                className="ndp-control ndp-select-btn"
                 onClick={() => setOpen((o) => !o)}
                 aria-haspopup="listbox"
                 aria-expanded={open}
@@ -297,17 +311,25 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent}) {
     );
 }
 
-function WalletConnect({chainType, address, connecting, error, onConnect, onDisconnect}) {
-    const kindLabel = chainType === "evm" ? "EVM wallet" : "Solana wallet";
+function WalletConnect({chainType, address, walletKind, connecting, error, onConnect, onDisconnect}) {
+    const [open, setOpen] = useState(false);
+    const ref = useOutsideClose(open, setOpen);
+    const isEvm = chainType === "evm";
+    const kindLabel = isEvm ? "EVM wallet" : "Solana wallet";
 
     return (
-        <div className="ndp-field ndp-wallet-field">
+        <div className="ndp-field ndp-wallet-field" ref={ref}>
             <label className="ndp-label">Wallet</label>
 
             {address ? (
-                <div className="ndp-wallet-connected">
+                <div className="ndp-control ndp-wallet-connected">
                     <span className="ndp-wallet-dot" aria-hidden="true"/>
-                    <span className="ndp-wallet-addr">{shorten(address)}</span>
+                    <span className="ndp-wallet-addr">
+                        {shorten(address)}
+                        {!isEvm && walletKind && (
+                            <span className="ndp-select-muted"> · {SOL_LABELS[walletKind] ?? walletKind}</span>
+                        )}
+                    </span>
                     <button
                         type="button"
                         className="ndp-wallet-disconnect"
@@ -317,10 +339,10 @@ function WalletConnect({chainType, address, connecting, error, onConnect, onDisc
                         <LogOut size={14}/>
                     </button>
                 </div>
-            ) : (
+            ) : isEvm ? (
                 <button
                     type="button"
-                    className="ndp-connect-btn"
+                    className="ndp-control ndp-connect-btn"
                     onClick={onConnect}
                     disabled={connecting}
                 >
@@ -336,6 +358,49 @@ function WalletConnect({chainType, address, connecting, error, onConnect, onDisc
                         </>
                     )}
                 </button>
+            ) : (
+                <div style={{position: "relative"}}>
+                    <button
+                        type="button"
+                        className="ndp-control ndp-connect-btn"
+                        onClick={() => setOpen((o) => !o)}
+                        disabled={connecting}
+                        aria-haspopup="listbox"
+                        aria-expanded={open}
+                    >
+                        {connecting ? (
+                            <>
+                                <Loader2 size={16} className="ndp-spin"/>
+                                Connecting…
+                            </>
+                        ) : (
+                            <>
+                                <Wallet size={16}/>
+                                Connect {kindLabel}
+                                <ChevronDown size={14} className={`ndp-chev ${open ? "ndp-chev-up" : ""}`}/>
+                            </>
+                        )}
+                    </button>
+
+                    {open && (
+                        <ul className="ndp-menu" role="listbox">
+                            {["phantom", "metamask", "walletconnect"].map((kind) => (
+                                <li key={kind}>
+                                    <button
+                                        type="button"
+                                        className="ndp-menu-item"
+                                        onClick={() => {
+                                            onConnect(kind);
+                                            setOpen(false);
+                                        }}
+                                    >
+                                        <span className="ndp-select-text">{SOL_LABELS[kind]}</span>
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
             )}
 
             {error && (
@@ -397,13 +462,19 @@ export default function App() {
         }
     }
 
-    async function connectSvmWallet() {
+    async function connectSvmWallet(kind) {
         setWalletError((e) => ({...e, svm: ""}));
         setWalletConnecting(true);
 
         try {
-            const conn = await connectPhantom();
-            setWallet((w) => ({...w, svm: conn}));
+            const connectors = {
+                phantom: connectPhantom,
+                metamask: connectSolanaMetaMask,
+                walletconnect: connectSolanaWalletConnect,
+            };
+            const conn = await connectors[kind]();
+
+            setWallet((w) => ({...w, svm: {...conn, kind}}));
         } catch (err) {
             setWalletError((e) => ({...e, svm: humanizeError(err)}));
         } finally {
@@ -596,6 +667,7 @@ export default function App() {
                     <WalletConnect
                         chainType={network.chainType}
                         address={walletAddress || null}
+                        walletKind={wallet.svm?.kind}
                         connecting={walletConnecting}
                         error={walletError[network.chainType] || ""}
                         onConnect={network.chainType === "evm" ? connectEvmWallet : connectSvmWallet}

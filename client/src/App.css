@@ -270,21 +270,26 @@ body {
     margin-bottom: 8px;
 }
 
-.ndp-select-btn {
+.ndp-control {
     width: 100%;
+    height: 48px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 10px;
-    background: var(--panel);
-    border: 1px solid var(--card-border);
-    color: var(--ivory);
     border-radius: 10px;
-    padding: 12px 14px;
+    padding: 0 14px;
     font-family: 'Inter', sans-serif;
     font-size: 14.5px;
     cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ndp-select-btn {
+    justify-content: space-between;
+    background: var(--panel);
+    border: 1px solid var(--card-border);
+    color: var(--ivory);
 }
 
 .ndp-select-btn:hover {
@@ -306,6 +311,15 @@ body {
 
 .ndp-select-muted {
     color: var(--muted);
+}
+
+.ndp-menu-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .ndp-dot {
@@ -344,6 +358,8 @@ body {
     top: calc(100% + 8px);
     left: 0;
     right: 0;
+    margin: 0;
+    list-style: none;
     background: #1F2440;
     border: 1px solid rgba(238, 234, 222, 0.14);
     border-radius: 12px;
@@ -360,6 +376,8 @@ body {
 
 .ndp-menu-item {
     width: 100%;
+    height: 44px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -367,11 +385,17 @@ body {
     border: none;
     color: var(--ivory);
     text-align: left;
-    padding: 10px 10px;
+    padding: 0 10px;
     border-radius: 8px;
     font-size: 14px;
     font-family: 'Inter', sans-serif;
     cursor: pointer;
+    margin: 0;
+}
+
+.ndp-menu li {
+    margin: 0;
+    padding: 0;
 }
 
 .ndp-menu-item:hover {
@@ -479,21 +503,12 @@ body {
 }
 
 .ndp-connect-btn {
-    width: 100%;
-    display: flex;
-    align-items: center;
     justify-content: center;
-    gap: 8px;
     background: transparent;
     border: 1px solid var(--teal);
     color: var(--teal);
-    border-radius: 10px;
-    padding: 11px 14px;
-    font-family: 'Inter', sans-serif;
     font-weight: 600;
     font-size: 13.5px;
-    cursor: pointer;
-    transition: background 0.15s ease;
 }
 
 .ndp-connect-btn:hover:not(:disabled) {
@@ -506,13 +521,8 @@ body {
 }
 
 .ndp-wallet-connected {
-    display: flex;
-    align-items: center;
-    gap: 10px;
     background: var(--panel);
     border: 1px solid var(--card-border);
-    border-radius: 10px;
-    padding: 10px 12px;
 }
 
 .ndp-wallet-dot {
