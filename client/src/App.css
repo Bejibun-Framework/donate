@@ -376,6 +376,19 @@ body {
     flex-shrink: 0;
 }
 
+.ndp-coin-avatar-img {
+    overflow: hidden;
+    padding: 0;
+}
+
+.ndp-coin-avatar-img img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
 .ndp-chev {
     color: var(--muted);
     transition: transform 0.15s ease;
