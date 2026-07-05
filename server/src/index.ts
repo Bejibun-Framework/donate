@@ -49,6 +49,14 @@ app.use("*", async (c: Context, next: Next) => {
     return corsMiddleware(c, next);
 });
 
+app.get("/", async (c: Context) => {
+    return c.json({
+        data: null,
+        message: "Success",
+        status: 200
+    }, 200);
+});
+
 app.post("/donate", async (c: Context) => {
     let payload: {
         price: {

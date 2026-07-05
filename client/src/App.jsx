@@ -39,6 +39,34 @@ function humanizeError(err) {
     return message;
 }
 
+// Converts a human-readable decimal amount (e.g. "0.001") into the token's
+// smallest-unit integer string (e.g. "1000" for 6 decimals). Done with
+// string arithmetic rather than floating-point math so precision isn't lost
+// for either very small or very large amounts. Any digits beyond the
+// token's `decimals` are truncated rather than rounded.
+function toBaseUnits(amount, decimals) {
+    const str = String(amount).trim();
+
+    if (!str || isNaN(Number(str))) return "0";
+
+    const negative = str.startsWith("-");
+    const unsigned = negative ? str.slice(1) : str;
+
+    let [whole, fraction = ""] = unsigned.split(".");
+    whole = whole.replace(/^0+(?=\d)/, "") || "0";
+
+    if (fraction.length > decimals) {
+        fraction = fraction.slice(0, decimals);
+    } else {
+        fraction = fraction.padEnd(decimals, "0");
+    }
+
+    let combined = (whole + fraction).replace(/^0+(?=\d)/, "");
+    if (combined === "") combined = "0";
+
+    return (negative && combined !== "0" ? "-" : "") + combined;
+}
+
 const NETWORKS = [
     {
         id: `eip155:${base.id}`,
@@ -935,7 +963,7 @@ export default function App() {
                 body: JSON.stringify({
                     price: {
                         asset: coin.contract,
-                        amount: "1000",
+                        amount: toBaseUnits(amount, coin.decimals),
                         extra: {
                             name: coin.name,
                             version: "2"
@@ -967,7 +995,7 @@ export default function App() {
         } finally {
             setSending(false);
         }
-    }, [walletConn, isEvm, canDonate, coin, network, walletAddress, message]);
+    }, [walletConn, isEvm, canDonate, coin, amount, network, walletAddress, message]);
 
     return (
         <div className="ndp-root">
