@@ -79,18 +79,38 @@ const NETWORKS = [
         viemChain: base, // used to build a read-only public client for custom-token lookups
         coins: [
             {
-                contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                symbol: "USDC",
-                decimals: 6,
-                name: "USD Coin",
-                stablecoin: true
-            },
-            {
-                // Bridged Tether USD on Base (there is no Circle/Tether-native USDT on Base)
                 contract: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
                 symbol: "USDT",
                 decimals: 6,
                 name: "Tether USD",
+                stablecoin: true
+            },
+            {
+                contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                symbol: "USDC",
+                decimals: 6,
+                name: "USDC",
+                stablecoin: true
+            },
+            {
+                contract: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+                symbol: "DAI",
+                decimals: 18,
+                name: "Dai Stablecoin",
+                stablecoin: true
+            },
+            {
+                contract: "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",
+                symbol: "USDe",
+                decimals: 18,
+                name: "USDe",
+                stablecoin: true
+            },
+            {
+                contract: "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+                symbol: "EURC",
+                decimals: 6,
+                name: "EURC",
                 stablecoin: true
             }
         ]
@@ -106,7 +126,6 @@ const NETWORKS = [
         viemChain: polygon,
         coins: [
             {
-                // Native USDC issued by Circle on Polygon PoS (not the older bridged USDC.e)
                 contract: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
                 symbol: "USDC",
                 decimals: 6,
@@ -114,11 +133,17 @@ const NETWORKS = [
                 stablecoin: true
             },
             {
-                // Tether's canonical USDT contract on Polygon PoS
-                contract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-                symbol: "USDT",
-                decimals: 6,
-                name: "Tether USD",
+                contract: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
+                symbol: "DAI",
+                decimals: 18,
+                name: "Dai Stablecoin",
+                stablecoin: true
+            },
+            {
+                contract: "0x9C9e5fD8bbc25984B178FdCE6117Defa39d2db39",
+                symbol: "BUSD",
+                decimals: 18,
+                name: "BUSD",
                 stablecoin: true
             }
         ]
@@ -134,7 +159,13 @@ const NETWORKS = [
         viemChain: arbitrum,
         coins: [
             {
-                // Native USDC issued by Circle on Arbitrum One (not the older bridged USDC.e)
+                contract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+                symbol: "USD₮0",
+                decimals: 6,
+                name: "USD₮0",
+                stablecoin: true
+            },
+            {
                 contract: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
                 symbol: "USDC",
                 decimals: 6,
@@ -142,11 +173,24 @@ const NETWORKS = [
                 stablecoin: true
             },
             {
-                // Bridged Tether USD on Arbitrum One
-                contract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-                symbol: "USDT",
-                decimals: 6,
-                name: "Tether USD",
+                contract: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+                symbol: "DAI",
+                decimals: 18,
+                name: "Dai Stablecoin",
+                stablecoin: true
+            },
+            {
+                contract: "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",
+                symbol: "USDe",
+                decimals: 18,
+                name: "USDe",
+                stablecoin: true
+            },
+            {
+                contract: "0x4D15a3A2286D883AF0AA1B3f21367843FAc63E07",
+                symbol: "TUSD",
+                decimals: 18,
+                name: "TrueUSD",
                 stablecoin: true
             }
         ]
@@ -969,7 +1013,10 @@ export default function App() {
 
         if (n.chainType === "evm" && wallet.evm && window.ethereum) {
             window.ethereum
-                .request({method: "wallet_switchEthereumChain", params: [{chainId: `0x${n.viemChain.id.toString(16)}`}]})
+                .request({
+                    method: "wallet_switchEthereumChain",
+                    params: [{chainId: `0x${n.viemChain.id.toString(16)}`}]
+                })
                 .catch(() => {
                 });
         }
