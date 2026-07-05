@@ -239,7 +239,7 @@ const NETWORKS = [
                 symbol: "BJBN",
                 decimals: 6,
                 name: "Bejibun",
-                stablecoin: true
+                stablecoin: false
             },
             {
                 contract: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
@@ -294,11 +294,6 @@ const NETWORKS = [
     }
 ];
 
-// Symbols recognized as USD-pegged stablecoins for the purpose of showing
-// preset dollar-amount chips. Custom tokens are checked against this list
-// by symbol since there's no reliable on-chain "is this a stablecoin" flag
-// to read; anything not matching is treated as a regular token, where a
-// fixed set of dollar amounts wouldn't make sense.
 const STABLECOIN_SYMBOLS = new Set(["USDC", "USDT", "DAI", "USDP", "TUSD", "USDD", "FDUSD", "PYUSD", "USDE"]);
 
 function isStablecoinSymbol(symbol) {
