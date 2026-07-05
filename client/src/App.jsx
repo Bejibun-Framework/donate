@@ -25,7 +25,7 @@ import {
 import {connectEvmWallet as connectEvmWalletLib} from "./lib/wallet.js";
 import {createPaymentFetch, readSettlement} from "./lib/x402Client.js";
 import {createPublicClient, getAddress, http} from "viem";
-import {base} from "viem/chains";
+import {arbitrum, base, polygon, worldchain} from "viem/chains";
 
 const RESOURCE_URL = import.meta.env.VITE_RESOURCE_SERVER_URL || "http://localhost:8787";
 const SOLANA_RPC_URL = import.meta.env.VITE_SOLANA_RPC || "https://api.mainnet-beta.solana.com";
@@ -82,7 +82,100 @@ const NETWORKS = [
                 contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
                 symbol: "USDC",
                 decimals: 6,
-                name: "USD Coin"
+                name: "USD Coin",
+                stablecoin: true
+            },
+            {
+                // Bridged Tether USD on Base (there is no Circle/Tether-native USDT on Base)
+                contract: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+                symbol: "USDT",
+                decimals: 6,
+                name: "Tether USD",
+                stablecoin: true
+            }
+        ]
+    },
+    {
+        id: `eip155:${polygon.id}`,
+        name: polygon.name,
+        nativeCurrency: polygon.nativeCurrency,
+        accent: "#B08CF0",
+        chainType: "evm",
+        trustWalletId: "polygon", // Trust Wallet assets repo blockchain slug
+        coinGeckoPlatform: "polygon-pos", // CoinGecko asset platform id
+        viemChain: polygon,
+        coins: [
+            {
+                // Native USDC issued by Circle on Polygon PoS (not the older bridged USDC.e)
+                contract: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+                symbol: "USDC",
+                decimals: 6,
+                name: "USD Coin",
+                stablecoin: true
+            },
+            {
+                // Tether's canonical USDT contract on Polygon PoS
+                contract: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+                symbol: "USDT",
+                decimals: 6,
+                name: "Tether USD",
+                stablecoin: true
+            }
+        ]
+    },
+    {
+        id: `eip155:${arbitrum.id}`,
+        name: "Arbitrum",
+        nativeCurrency: arbitrum.nativeCurrency,
+        accent: "#8CC5F0",
+        chainType: "evm",
+        trustWalletId: "arbitrum", // Trust Wallet assets repo blockchain slug
+        coinGeckoPlatform: "arbitrum-one", // CoinGecko asset platform id
+        viemChain: arbitrum,
+        coins: [
+            {
+                // Native USDC issued by Circle on Arbitrum One (not the older bridged USDC.e)
+                contract: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+                symbol: "USDC",
+                decimals: 6,
+                name: "USD Coin",
+                stablecoin: true
+            },
+            {
+                // Bridged Tether USD on Arbitrum One
+                contract: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+                symbol: "USDT",
+                decimals: 6,
+                name: "Tether USD",
+                stablecoin: true
+            }
+        ]
+    },
+    {
+        id: `eip155:${worldchain.id}`,
+        name: "World",
+        nativeCurrency: worldchain.nativeCurrency,
+        accent: "#8CF0D2",
+        chainType: "evm",
+        trustWalletId: "worldchain", // Trust Wallet assets repo blockchain slug
+        coinGeckoPlatform: "world-chain", // CoinGecko asset platform id
+        viemChain: worldchain,
+        coins: [
+            {
+                // Native USDC issued by Circle on World Chain
+                contract: "0x79A02482A880bCE3F13e09Da970dC34db4CD24d1",
+                symbol: "USDC",
+                decimals: 6,
+                name: "USD Coin",
+                stablecoin: true
+            },
+            {
+                // Worldcoin's WLD token, bridged onto World Chain from Ethereum mainnet
+                contract: "0x2cFc85d8E48F8EAB294be644d9E25C3030863003",
+                symbol: "WLD",
+                decimals: 18,
+                name: "Worldcoin",
+                stablecoin: false
             }
         ]
     },
@@ -103,11 +196,30 @@ const NETWORKS = [
                 contract: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                 symbol: "USDC",
                 decimals: 6,
-                name: "USD Coin"
+                name: "USD Coin",
+                stablecoin: true
+            },
+            {
+                contract: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+                symbol: "USDT",
+                decimals: 6,
+                name: "Tether USD",
+                stablecoin: true
             }
         ]
     }
 ];
+
+// Symbols recognized as USD-pegged stablecoins for the purpose of showing
+// preset dollar-amount chips. Custom tokens are checked against this list
+// by symbol since there's no reliable on-chain "is this a stablecoin" flag
+// to read; anything not matching is treated as a regular token, where a
+// fixed set of dollar amounts wouldn't make sense.
+const STABLECOIN_SYMBOLS = new Set(["USDC", "USDT", "DAI", "USDP", "TUSD", "USDD", "FDUSD", "PYUSD", "USDE"]);
+
+function isStablecoinSymbol(symbol) {
+    return STABLECOIN_SYMBOLS.has(String(symbol || "").toUpperCase());
+}
 
 const AMOUNTS = [5, 10, 25, 50, 100, 250];
 
@@ -615,6 +727,7 @@ function CoinDropdown({coins, value, onChange, onAddCustom, accent, network}) {
                 name: meta.name,
                 contract: meta.contract,
                 decimals: meta.decimals,
+                stablecoin: isStablecoinSymbol(meta.symbol),
                 custom: true
             });
 
@@ -856,7 +969,7 @@ export default function App() {
 
         if (n.chainType === "evm" && wallet.evm && window.ethereum) {
             window.ethereum
-                .request({method: "wallet_switchEthereumChain", params: [{chainId: n.id}]})
+                .request({method: "wallet_switchEthereumChain", params: [{chainId: `0x${n.viemChain.id.toString(16)}`}]})
                 .catch(() => {
                 });
         }
@@ -1038,7 +1151,11 @@ export default function App() {
                             <div className="ndp-receipt-row">
                                 <span className="ndp-receipt-key">Amount</span>
                                 <span className="ndp-receipt-val ndp-receipt-amount">
-                                    {canDonate ? `$${numericAmount.toLocaleString()}` : "—"}
+                                    {canDonate
+                                        ? (coin.stablecoin
+                                            ? `$${numericAmount.toLocaleString()}`
+                                            : `${numericAmount.toLocaleString()} ${coin.symbol}`)
+                                        : "—"}
                                 </span>
                             </div>
 
@@ -1088,33 +1205,37 @@ export default function App() {
                             className="ndp-field"
                         />
 
-                        <div className="ndp-field">
-                            <label className="ndp-label">Amount</label>
-                            <div className="ndp-amount-grid">
-                                {AMOUNTS.map((v) => (
-                                    <button
-                                        key={v}
-                                        type="button"
-                                        className={`ndp-chip ${activeChip === v ? "ndp-chip-active" : ""}`}
-                                        onClick={() => handleChip(v)}
-                                    >
-                                        ${v}
-                                    </button>
-                                ))}
+                        {coin.stablecoin && (
+                            <div className="ndp-field">
+                                <label className="ndp-label">Amount</label>
+                                <div className="ndp-amount-grid">
+                                    {AMOUNTS.map((v) => (
+                                        <button
+                                            key={v}
+                                            type="button"
+                                            className={`ndp-chip ${activeChip === v ? "ndp-chip-active" : ""}`}
+                                            onClick={() => handleChip(v)}
+                                        >
+                                            ${v}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         <div className="ndp-field ndp-amount-input-wrap">
-                            <span className="ndp-amount-currency">$</span>
+                            <span className="ndp-amount-currency">{coin.stablecoin ? "$" : ""}</span>
                             <input
                                 className="ndp-amount-input"
                                 inputMode="decimal"
                                 placeholder="0.00"
                                 value={amount}
                                 onChange={(e) => handleManualAmount(e.target.value)}
-                                aria-label="Custom amount in dollars"
+                                aria-label={coin.stablecoin ? "Custom amount in dollars" : `Amount in ${coin.symbol}`}
                             />
-                            <span className="ndp-amount-suffix">USD equiv.</span>
+                            <span className="ndp-amount-suffix">
+                                {coin.symbol}
+                            </span>
                         </div>
 
                         <div className="ndp-field">
@@ -1144,7 +1265,9 @@ export default function App() {
                                 </>
                             ) : (
                                 <>
-                                    Donate {canDonate ? `$${numericAmount.toLocaleString()}` : ""} in {coin.symbol}
+                                    {coin.stablecoin
+                                        ? <>Donate {canDonate ? `$${numericAmount.toLocaleString()}` : ""} in {coin.symbol}</>
+                                        : <>Donate {canDonate ? `${numericAmount.toLocaleString()} ${coin.symbol}` : coin.symbol}</>}
                                     <ArrowRight size={17}/>
                                 </>
                             )}
