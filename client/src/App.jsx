@@ -192,6 +192,13 @@ const NETWORKS = [
                 decimals: 18,
                 name: "TrueUSD",
                 stablecoin: true
+            },
+            {
+                contract: "0x93C9932E4afa59201F0B5E63f7d816516F1669fE",
+                symbol: "FDUSD",
+                decimals: 18,
+                name: "First Digital USD",
+                stablecoin: true
             }
         ]
     },
@@ -206,20 +213,11 @@ const NETWORKS = [
         viemChain: worldchain,
         coins: [
             {
-                // Native USDC issued by Circle on World Chain
                 contract: "0x79A02482A880bCE3F13e09Da970dC34db4CD24d1",
                 symbol: "USDC",
                 decimals: 6,
-                name: "USD Coin",
+                name: "USDC",
                 stablecoin: true
-            },
-            {
-                // Worldcoin's WLD token, bridged onto World Chain from Ethereum mainnet
-                contract: "0x2cFc85d8E48F8EAB294be644d9E25C3030863003",
-                symbol: "WLD",
-                decimals: 18,
-                name: "Worldcoin",
-                stablecoin: false
             }
         ]
     },
@@ -237,17 +235,59 @@ const NETWORKS = [
         coinGeckoPlatform: "solana", // CoinGecko asset platform id
         coins: [
             {
-                contract: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                symbol: "USDC",
+                contract: "CQhbNnCGKfDaKXt8uE61i5DrBYJV7NPsCDD9vQgypump",
+                symbol: "BJBN",
                 decimals: 6,
-                name: "USD Coin",
+                name: "Bejibun",
                 stablecoin: true
             },
             {
                 contract: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
                 symbol: "USDT",
                 decimals: 6,
-                name: "Tether USD",
+                name: "USDT",
+                stablecoin: true
+            },
+            {
+                contract: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                symbol: "USDC",
+                decimals: 6,
+                name: "USDC",
+                stablecoin: true
+            },
+            {
+                contract: "EjmyN6qEC1Tf1JxiG1ae7UTJhUxSwk1TCWNWqxWV4J6o",
+                symbol: "DAI",
+                decimals: 8,
+                name: "Dai Stablecoin",
+                stablecoin: true
+            },
+            {
+                contract: "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
+                symbol: "USD1",
+                decimals: 6,
+                name: "World Liberty Financial USD",
+                stablecoin: true
+            },
+            {
+                contract: "9zNQRsGLjNKwCUU5Gq5LR8beUCPzQMVMqKAi3SSZh54u",
+                symbol: "FDUSD",
+                decimals: 6,
+                name: "First Digital USD",
+                stablecoin: true
+            },
+            {
+                contract: "33fsBLA8djQm82RpHmE3SuVrPGtZBWNYExsEUeKX1HXX",
+                symbol: "BUSD",
+                decimals: 8,
+                name: "Binance USD",
+                stablecoin: true
+            },
+            {
+                contract: "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+                symbol: "EURC",
+                decimals: 6,
+                name: "EURC",
                 stablecoin: true
             }
         ]
