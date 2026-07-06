@@ -6,6 +6,7 @@ import {
     Loader2,
     LogOut,
     Plus,
+    Printer,
     Wallet,
     X
 } from "lucide-react";
@@ -76,7 +77,7 @@ const NETWORKS = [
         chainType: "evm",
         trustWalletId: "base", // Trust Wallet assets repo blockchain slug
         coinGeckoPlatform: "base", // CoinGecko asset platform id
-        viemChain: base, // used to build a read-only public client for custom-token lookups
+        viemChain: base, // used to build a read-only public client for custom-token lookups; also supplies the block explorer URL
         coins: [
             {
                 contract: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
@@ -89,7 +90,7 @@ const NETWORKS = [
                 contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
                 symbol: "USDC",
                 decimals: 6,
-                name: "USDC",
+                name: "USD Coin",
                 stablecoin: true
             },
             {
@@ -110,7 +111,7 @@ const NETWORKS = [
                 contract: "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
                 symbol: "EURC",
                 decimals: 6,
-                name: "EURC",
+                name: "Euro Coin",
                 stablecoin: true
             }
         ]
@@ -143,7 +144,7 @@ const NETWORKS = [
                 contract: "0x9C9e5fD8bbc25984B178FdCE6117Defa39d2db39",
                 symbol: "BUSD",
                 decimals: 18,
-                name: "BUSD",
+                name: "Binance-Peg BUSD Token",
                 stablecoin: true
             }
         ]
@@ -216,7 +217,7 @@ const NETWORKS = [
                 contract: "0x79A02482A880bCE3F13e09Da970dC34db4CD24d1",
                 symbol: "USDC",
                 decimals: 6,
-                name: "USDC",
+                name: "USD Coin",
                 stablecoin: true
             }
         ]
@@ -233,6 +234,7 @@ const NETWORKS = [
         chainType: "svm",
         trustWalletId: "solana", // Trust Wallet assets repo blockchain slug
         coinGeckoPlatform: "solana", // CoinGecko asset platform id
+        explorerTxUrl: (tx) => `https://solscan.io/tx/${tx}`,
         coins: [
             {
                 contract: "CQhbNnCGKfDaKXt8uE61i5DrBYJV7NPsCDD9vQgypump",
@@ -252,7 +254,7 @@ const NETWORKS = [
                 contract: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                 symbol: "USDC",
                 decimals: 6,
-                name: "USDC",
+                name: "USD Coin",
                 stablecoin: true
             },
             {
@@ -396,7 +398,7 @@ async function fetchSolanaOnChainLogo(contract) {
 
 // EVM addresses need EIP-55 checksumming to match Trust Wallet's repo paths
 // exactly; Solana (base58) addresses are used as-is and must not be altered.
-function checksummedForRepo(contract, network) {
+function checkSummedForRepo(contract, network) {
     if (network.chainType !== "evm") return contract;
 
     try {
@@ -407,7 +409,7 @@ function checksummedForRepo(contract, network) {
 }
 
 function trustWalletLogoUrl(contract, network) {
-    const address = checksummedForRepo(contract, network);
+    const address = checkSummedForRepo(contract, network);
 
     return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${network.trustWalletId}/assets/${address}/logo.png`;
 }
@@ -592,6 +594,16 @@ function shorten(value, lead = 5, tail = 5) {
     return value.length > lead + tail ? `${value.slice(0, lead)}...${value.slice(-tail)}` : value;
 }
 
+// EVM networks carry a viem chain object, whose `blockExplorers.default.url`
+// is the canonical explorer base URL — no need to hardcode it separately.
+// Solana has no viem chain, so it falls back to its own explorerTxUrl field.
+function getExplorerTxUrl(network, tx) {
+    const base = network.viemChain?.blockExplorers?.default?.url;
+    if (base) return `${base}/tx/${tx}`;
+
+    return network.explorerTxUrl ? network.explorerTxUrl(tx) : null;
+}
+
 // Renders a token's real logo in tiers:
 //   1. Trust Wallet's direct repo image — fast, just an <img src>, cleanly
 //      404s if missing (no external fetch call needed to try it).
@@ -629,10 +641,7 @@ function CoinAvatar({coin, network, accent, size = 22}) {
 
     if (stage === "direct") {
         return (
-            <span
-                className="ndp-coin-avatar ndp-coin-avatar-img"
-                style={{borderColor: accent, width: size, height: size}}
-            >
+            <span className="ndp-coin-avatar ndp-coin-avatar-img">
                 <img
                     src={trustWalletLogoUrl(coin.contract, network)}
                     alt={coin.symbol}
@@ -647,10 +656,7 @@ function CoinAvatar({coin, network, accent, size = 22}) {
 
     if (stage === "resolved" && resolvedUrl) {
         return (
-            <span
-                className="ndp-coin-avatar ndp-coin-avatar-img"
-                style={{borderColor: accent, width: size, height: size}}
-            >
+            <span className="ndp-coin-avatar ndp-coin-avatar-img">
                 <img
                     src={resolvedUrl}
                     alt={coin.symbol}
@@ -1116,6 +1122,41 @@ export default function App() {
         setAmount(String(v));
     }
 
+    // Sizes the printed page to exactly match the receipt's rendered
+    // dimensions, so printing (or "Save as PDF") produces a page that is
+    // just the receipt — no default paper size, no surrounding blank space.
+    // This is a progressive enhancement: the stylesheet also ships a
+    // compact fixed @page fallback for browsers/hosts that ignore it
+    // (e.g. print triggered from outside this exact DOM, or a host page
+    // that repaints between measuring and printing).
+    function handlePrint() {
+        const el = document.getElementById("ndp-receipt-printable");
+        let styleTag = null;
+
+        if (el) {
+            // Force layout so the measurement reflects the current content
+            // (amount, note length, tx hash, etc.) rather than a stale box.
+            void el.offsetHeight;
+            const rect = el.getBoundingClientRect();
+            const width = Math.max(300, Math.ceil(rect.width) + 12);
+            const height = Math.max(400, Math.ceil(rect.height) + 12);
+
+            styleTag = document.createElement("style");
+            styleTag.setAttribute("data-ndp-print-size", "true");
+            styleTag.textContent = `@media print { @page { size: ${width}px ${height}px; margin: 0; } }`;
+            document.head.appendChild(styleTag);
+        }
+
+        const cleanup = () => {
+            styleTag?.remove();
+            window.removeEventListener("afterprint", cleanup);
+        };
+        window.addEventListener("afterprint", cleanup);
+
+        // Let the injected stylesheet apply before the print dialog opens.
+        requestAnimationFrame(() => window.print());
+    }
+
     function handleManualAmount(v) {
         const clean = v.replace(/[^0-9.]/g, "");
         setAmount(clean);
@@ -1184,7 +1225,7 @@ export default function App() {
             const data = await response.json();
             const settlement = readSettlement(httpClient, response);
 
-            setSendResult({data, settlement});
+            setSendResult({data, settlement, timestamp: new Date()});
         } catch (err) {
             setSendError(humanizeError(err));
         } finally {
@@ -1194,22 +1235,27 @@ export default function App() {
 
     return (
         <div className="ndp-root">
-            <div className="ndp-bg-grid" aria-hidden="true"/>
+            <div className="ndp-bg-grid ndp-no-print" aria-hidden="true"/>
 
             <div className="ndp-shell">
                 {/* -------- Left: narrative + receipt -------- */}
                 <div className="ndp-left">
-                    <div className="ndp-eyebrow">On-chain support</div>
-                    <h1 className="ndp-headline">
+                    <div className="ndp-eyebrow ndp-no-print">On-chain support</div>
+                    <h1 className="ndp-headline ndp-no-print">
                         Fuel the <em>next commit.</em>
                     </h1>
-                    <p className="ndp-sub">
+                    <p className="ndp-sub ndp-no-print">
                         Bejibun Labs builds open tools for the decentralized web.
                         Contributions move straight from your wallet to the project's — no processor,
                         no delay, no cut taken along the way.
                     </p>
 
-                    <div className="ndp-receipt">
+                    <div className="ndp-receipt" id="ndp-receipt-printable">
+                        {sendResult && (
+                            <div className="ndp-receipt-seal ndp-print-only" aria-hidden="true">
+                                <span>Settled<br/>on-chain</span>
+                            </div>
+                        )}
                         <div className="ndp-receipt-top">
                             <span className="ndp-receipt-title">Donation receipt</span>
                             <span className="ndp-receipt-id">#{network.nativeCurrency.symbol}-{coin.symbol}</span>
@@ -1219,7 +1265,7 @@ export default function App() {
                             {walletAddress && (
                                 <div className="ndp-receipt-row">
                                     <span className="ndp-receipt-key">From</span>
-                                    <span className="ndp-receipt-val">{shorten(walletAddress)}</span>
+                                    <span className="ndp-receipt-val ndp-receipt-mono-full">{walletAddress}</span>
                                 </div>
                             )}
                             <div className="ndp-receipt-row">
@@ -1247,13 +1293,33 @@ export default function App() {
                                     <span className="ndp-receipt-note">&ldquo;{message.trim()}&rdquo;</span>
                                 </div>
                             )}
+
+                            {sendResult && (
+                                <>
+                                    <div className="ndp-receipt-row">
+                                        <span className="ndp-receipt-key">Date</span>
+                                        <span className="ndp-receipt-val">
+                                            {(sendResult.timestamp ?? new Date()).toLocaleString()}
+                                        </span>
+                                    </div>
+
+                                    {sendResult.settlement?.transaction && (
+                                        <div className="ndp-receipt-row">
+                                            <span className="ndp-receipt-key">Tx</span>
+                                            <span className="ndp-receipt-val ndp-receipt-mono-full">
+                                                {sendResult.settlement.transaction}
+                                            </span>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </div>
                         <div className="ndp-receipt-bottom">Settles directly on {network.name}</div>
                     </div>
                 </div>
 
                 {/* -------- Right: form card -------- */}
-                <div className="ndp-card">
+                <div className="ndp-card ndp-no-print">
                     <h2 className="ndp-card-title">
                         {sendResult ? "Donation sent" : "Make a donation"}
                     </h2>
@@ -1375,21 +1441,51 @@ export default function App() {
                             <p className="ndp-reveal-note">
                                 Settled on {network.name}
                                 {sendResult.settlement?.transaction && (
-                                    <> — tx {shorten(sendResult.settlement.transaction, 10, 8)}</>
+                                    <>
+                                        {" "}— tx{" "}
+                                        {(() => {
+                                            const txHash = sendResult.settlement.transaction;
+                                            const url = getExplorerTxUrl(network, txHash);
+
+                                            return url ? (
+                                                <a
+                                                    href={url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="ndp-tx-link"
+                                                >
+                                                    {shorten(txHash, 10, 10)}
+                                                </a>
+                                            ) : (
+                                                shorten(txHash, 10, 10)
+                                            );
+                                        })()}
+                                    </>
                                 )}
                                 {message.trim() ? " — your note was saved with this donation." : "."}
                             </p>
 
-                            <button
-                                type="button"
-                                className="ndp-btn-secondary"
-                                onClick={() => {
-                                    setSendResult(null);
-                                    setSendError("");
-                                }}
-                            >
-                                Make another donation
-                            </button>
+                            <div className="ndp-post-donate-actions" style={{display: "flex", gap: "10px"}}>
+                                <button
+                                    type="button"
+                                    className="ndp-btn-secondary"
+                                    onClick={handlePrint}
+                                >
+                                    <Printer size={14}/>
+                                    Print receipt
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="ndp-btn-secondary"
+                                    onClick={() => {
+                                        setSendResult(null);
+                                        setSendError("");
+                                    }}
+                                >
+                                    Make another donation
+                                </button>
+                            </div>
                         </>
                     )}
                 </div>
