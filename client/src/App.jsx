@@ -1162,21 +1162,54 @@ export default function App() {
     // browser-injected header/footer (that strip is added by the print
     // pipeline itself; going around it is the only way to avoid it).
     //
-    // html2pdf snapshots the DOM under whatever styles are active right
-    // now (screen media, not print media), so the ticket look is applied
-    // by toggling a plain class — .ndp-pdf-active — for the moment of
-    // capture, rather than living behind an unusable @media print rule.
+    // The ticket look (.ndp-pdf-active) is applied to an off-screen clone,
+    // not the visible receipt — toggling it on the live element would
+    // flash the on-screen dark UI into the printed ticket style for the
+    // moment it takes to capture. The clone lives inside a zero-size,
+    // clipped wrapper at the same DOM depth as the original (see below
+    // for why), so nothing ever becomes visible.
     async function handleDownloadPdf() {
-        const el = document.getElementById("ndp-receipt-printable");
-        if (!el || generatingPdf) return;
+        const original = document.getElementById("ndp-receipt-printable");
+        if (!original || generatingPdf) return;
 
         setGeneratingPdf(true);
-        el.classList.add("ndp-pdf-active");
+
+        const clone = original.cloneNode(true);
+        clone.removeAttribute("id");
+        clone.classList.add("ndp-pdf-active");
+        clone.style.margin = "0";
+
+        // A zero-size, clipped wrapper hides the clone without pushing it
+        // to a large negative offset — html2canvas derives its capture
+        // region from the element's on-page position, and a huge offset
+        // (e.g. left: -10000px) paired with a small explicit capture
+        // window produces an empty crop, i.e. a blank PDF. Staying near
+        // (0, 0) avoids that. It's appended alongside the original (still
+        // inside .ndp-root) so it keeps inheriting the root stylesheet's
+        // box-sizing rules, fonts, etc.
+        const wrapper = document.createElement("div");
+        wrapper.style.position = "fixed";
+        wrapper.style.top = "0";
+        wrapper.style.left = "0";
+        wrapper.style.width = "0";
+        wrapper.style.height = "0";
+        wrapper.style.overflow = "hidden";
+        wrapper.style.pointerEvents = "none";
+        wrapper.setAttribute("aria-hidden", "true");
+        wrapper.appendChild(clone);
+        original.parentNode.appendChild(wrapper);
 
         try {
-            // Let the class-driven styles (and any images, like the QR
-            // code) finish painting before html2canvas walks the DOM.
+            // Let layout settle, then make sure the web fonts (Fraunces,
+            // IBM Plex Mono) have actually finished loading before
+            // measuring anything. If they're still pending, text renders
+            // in a fallback font with different metrics — measuring the
+            // notch position against that gives a value that's wrong by
+            // however much the layout shifts once the real font swaps in.
             await new Promise((resolve) => requestAnimationFrame(resolve));
+            if (document.fonts?.ready) {
+                await document.fonts.ready;
+            }
 
             // Line the "tear here" notches up with the dashed divider
             // above the total — that row's top border is the actual
@@ -1189,16 +1222,16 @@ export default function App() {
             // border-width correction matters because CSS positions the
             // notches relative to the card's padding edge, not its
             // border edge.
-            const totalRow = el.querySelector(".ndp-receipt-total-row");
+            const totalRow = clone.querySelector(".ndp-receipt-total-row");
             if (totalRow) {
-                const elRect = el.getBoundingClientRect();
+                const cloneRect = clone.getBoundingClientRect();
                 const rowRect = totalRow.getBoundingClientRect();
-                const elBorderTop = parseFloat(getComputedStyle(el).borderTopWidth) || 0;
-                const notchTop = (rowRect.top - elRect.top) - elBorderTop;
-                el.style.setProperty("--ndp-notch-top", `${notchTop}px`);
+                const borderTop = parseFloat(getComputedStyle(clone).borderTopWidth) || 0;
+                const notchTop = (rowRect.top - cloneRect.top) - borderTop;
+                clone.style.setProperty("--ndp-notch-top", `${notchTop}px`);
             }
 
-            const rect = el.getBoundingClientRect();
+            const rect = clone.getBoundingClientRect();
             const width = Math.ceil(rect.width);
             const height = Math.ceil(rect.height);
 
@@ -1226,13 +1259,12 @@ export default function App() {
                     // never let html2pdf auto-split this into more pages.
                     pagebreak: {mode: ["avoid-all"]}
                 })
-                .from(el)
+                .from(clone)
                 .save();
         } catch (err) {
             setSendError(humanizeError(err));
         } finally {
-            el.classList.remove("ndp-pdf-active");
-            el.style.removeProperty("--ndp-notch-top");
+            wrapper.remove();
             setGeneratingPdf(false);
         }
     }
@@ -1373,7 +1405,7 @@ export default function App() {
                             </div>
 
                             {message.trim() && (
-                                <div className="ndp-receipt-row">
+                                <div className="ndp-receipt-row ndp-receipt-note-row">
                                     <span className="ndp-receipt-key">Note</span>
                                     <span className="ndp-receipt-note">&ldquo;{message.trim()}&rdquo;</span>
                                 </div>

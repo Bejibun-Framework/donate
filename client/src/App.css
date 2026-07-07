@@ -908,6 +908,29 @@ body {
     font-size: 10.5px;
 }
 
+/* The note is visually promoted to sit directly above the total (via
+   flex order, same trick as the total row itself — the DOM/on-screen
+   layout is untouched) and restyled as its own stacked block: label on
+   one line, the full message left-aligned underneath, rather than the
+   inline right-aligned value the other rows use. Notes can run long,
+   and right-aligned multi-line text is hard to read. */
+.ndp-pdf-active .ndp-receipt-note-row {
+    order: 9;
+    display: block;
+    padding: 10px 0;
+}
+
+.ndp-pdf-active .ndp-receipt-note-row .ndp-receipt-key {
+    display: block;
+    margin-bottom: 6px;
+}
+
+.ndp-pdf-active .ndp-receipt-note-row .ndp-receipt-note {
+    display: block;
+    text-align: left;
+    max-width: 100%;
+}
+
 /* The amount/total row is visually promoted to the bottom of the
    line items (via flex order, so the DOM — and therefore the
    on-screen layout — is untouched) and styled as the ticket's bold
