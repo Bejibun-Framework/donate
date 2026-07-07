@@ -6,7 +6,7 @@ import {
     Loader2,
     LogOut,
     Plus,
-    Printer,
+    Download,
     Wallet,
     X
 } from "lucide-react";
@@ -17,6 +17,8 @@ import {
     useRef,
     useState
 } from "react";
+import QRCode from "qrcode";
+import html2pdf from "html2pdf.js";
 import {
     connectPhantom,
     connectSolanaMetaMask,
@@ -1038,6 +1040,8 @@ export default function App() {
     const [sending, setSending] = useState(false);
     const [sendError, setSendError] = useState("");
     const [sendResult, setSendResult] = useState(null);
+    const [qrDataUrl, setQrDataUrl] = useState(null);
+    const [generatingPdf, setGeneratingPdf] = useState(false);
 
     const network = NETWORKS.find((n) => n.id === networkId);
     const coinList = useMemo(
@@ -1045,6 +1049,37 @@ export default function App() {
         [network, customCoins, networkId]
     );
     const coin = coinList.find((c) => c.contract === coinContract) || coinList[0];
+
+    // Once a donation settles, render a real, scannable QR code that
+    // points straight at the transaction on the network's block explorer —
+    // the same URL already used for the "view on explorer" link above.
+    useEffect(() => {
+        const tx = sendResult?.settlement?.transaction;
+        const url = tx ? getExplorerTxUrl(network, tx) : null;
+
+        if (!url) {
+            setQrDataUrl(null);
+            return;
+        }
+
+        let cancelled = false;
+
+        QRCode.toDataURL(url, {
+            margin: 1,
+            width: 240,
+            color: {dark: "#2B2A26", light: "#00000000"}
+        })
+            .then((dataUrl) => {
+                if (!cancelled) setQrDataUrl(dataUrl);
+            })
+            .catch(() => {
+                if (!cancelled) setQrDataUrl(null);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [sendResult, network]);
 
     function handleNetworkChange(id) {
         const n = NETWORKS.find((x) => x.id === id);
@@ -1122,39 +1157,84 @@ export default function App() {
         setAmount(String(v));
     }
 
-    // Sizes the printed page to exactly match the receipt's rendered
-    // dimensions, so printing (or "Save as PDF") produces a page that is
-    // just the receipt — no default paper size, no surrounding blank space.
-    // This is a progressive enhancement: the stylesheet also ships a
-    // compact fixed @page fallback for browsers/hosts that ignore it
-    // (e.g. print triggered from outside this exact DOM, or a host page
-    // that repaints between measuring and printing).
-    function handlePrint() {
+    // Renders the receipt straight to a PDF and downloads it — no browser
+    // print dialog at all, so there's no paper-size guessing and no
+    // browser-injected header/footer (that strip is added by the print
+    // pipeline itself; going around it is the only way to avoid it).
+    //
+    // html2pdf snapshots the DOM under whatever styles are active right
+    // now (screen media, not print media), so the ticket look is applied
+    // by toggling a plain class — .ndp-pdf-active — for the moment of
+    // capture, rather than living behind an unusable @media print rule.
+    async function handleDownloadPdf() {
         const el = document.getElementById("ndp-receipt-printable");
-        let styleTag = null;
+        if (!el || generatingPdf) return;
 
-        if (el) {
-            // Force layout so the measurement reflects the current content
-            // (amount, note length, tx hash, etc.) rather than a stale box.
-            void el.offsetHeight;
+        setGeneratingPdf(true);
+        el.classList.add("ndp-pdf-active");
+
+        try {
+            // Let the class-driven styles (and any images, like the QR
+            // code) finish painting before html2canvas walks the DOM.
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+
+            // Line the "tear here" notches up with the dashed divider
+            // above the total — that row's top border is the actual
+            // perforation line, and its offset shifts with content
+            // (address wrapping, note length, etc.), so it's measured
+            // fresh each export rather than assumed to sit at 50%.
+            //
+            // getBoundingClientRect (not offsetTop) keeps both
+            // measurements in the same coordinate space, and the
+            // border-width correction matters because CSS positions the
+            // notches relative to the card's padding edge, not its
+            // border edge.
+            const totalRow = el.querySelector(".ndp-receipt-total-row");
+            if (totalRow) {
+                const elRect = el.getBoundingClientRect();
+                const rowRect = totalRow.getBoundingClientRect();
+                const elBorderTop = parseFloat(getComputedStyle(el).borderTopWidth) || 0;
+                const notchTop = (rowRect.top - elRect.top) - elBorderTop;
+                el.style.setProperty("--ndp-notch-top", `${notchTop}px`);
+            }
+
             const rect = el.getBoundingClientRect();
-            const width = Math.max(300, Math.ceil(rect.width) + 12);
-            const height = Math.max(400, Math.ceil(rect.height) + 12);
+            const width = Math.ceil(rect.width);
+            const height = Math.ceil(rect.height);
 
-            styleTag = document.createElement("style");
-            styleTag.setAttribute("data-ndp-print-size", "true");
-            styleTag.textContent = `@media print { @page { size: ${width}px ${height}px; margin: 0; } }`;
-            document.head.appendChild(styleTag);
+            await html2pdf()
+                .set({
+                    margin: 0,
+                    filename: `bejibun-donation-receipt-${Date.now()}.pdf`,
+                    image: {type: "jpeg", quality: 0.98},
+                    html2canvas: {
+                        scale: 2,
+                        backgroundColor: "#ffffff",
+                        useCORS: true,
+                        // Pin html2canvas's capture window to the receipt's
+                        // exact size — otherwise it can measure a hair
+                        // taller than the page we're about to give it,
+                        // and that leftover sliver spills onto a second,
+                        // almost-blank page.
+                        width,
+                        height,
+                        windowWidth: width,
+                        windowHeight: height
+                    },
+                    jsPDF: {unit: "px", format: [width, height], orientation: "portrait"},
+                    // Belt-and-suspenders: even with matched dimensions,
+                    // never let html2pdf auto-split this into more pages.
+                    pagebreak: {mode: ["avoid-all"]}
+                })
+                .from(el)
+                .save();
+        } catch (err) {
+            setSendError(humanizeError(err));
+        } finally {
+            el.classList.remove("ndp-pdf-active");
+            el.style.removeProperty("--ndp-notch-top");
+            setGeneratingPdf(false);
         }
-
-        const cleanup = () => {
-            styleTag?.remove();
-            window.removeEventListener("afterprint", cleanup);
-        };
-        window.addEventListener("afterprint", cleanup);
-
-        // Let the injected stylesheet apply before the print dialog opens.
-        requestAnimationFrame(() => window.print());
     }
 
     function handleManualAmount(v) {
@@ -1251,16 +1331,16 @@ export default function App() {
                     </p>
 
                     <div className="ndp-receipt" id="ndp-receipt-printable">
-                        {sendResult && (
-                            <div className="ndp-receipt-seal ndp-print-only" aria-hidden="true">
-                                <span>Settled<br/>on-chain</span>
-                            </div>
-                        )}
-                        <div className="ndp-receipt-top">
+                        <div className="ndp-receipt-brand ndp-print-only">
+                            <div className="ndp-receipt-brand-name">Bejibun Labs</div>
+                            <div className="ndp-receipt-brand-sub">Donation receipt</div>
+                        </div>
+
+                        <div className="ndp-receipt-top ndp-screen-only">
                             <span className="ndp-receipt-title">Donation receipt</span>
                             <span className="ndp-receipt-id">#{network.nativeCurrency.symbol}-{coin.symbol}</span>
                         </div>
-                        <div className="ndp-perf"/>
+                        <div className="ndp-perf ndp-screen-only"/>
                         <div className="ndp-receipt-rows">
                             {walletAddress && (
                                 <div className="ndp-receipt-row">
@@ -1276,8 +1356,13 @@ export default function App() {
                                 <span className="ndp-receipt-key">Asset</span>
                                 <span className="ndp-receipt-val">{coin.symbol}</span>
                             </div>
-                            <div className="ndp-receipt-row">
-                                <span className="ndp-receipt-key">Amount</span>
+
+                            {/* This row renders identically on screen and on the printed
+                                ticket, so the stablecoin-vs-token amount format
+                                (`$25` vs `0.5 SOL`) only lives in one place. Print styling
+                                moves it visually to the bottom via CSS flex order. */}
+                            <div className="ndp-receipt-row ndp-receipt-total-row">
+                                <span className="ndp-receipt-key ndp-receipt-total-label">Amount</span>
                                 <span className="ndp-receipt-val ndp-receipt-amount">
                                     {canDonate
                                         ? (coin.stablecoin
@@ -1314,6 +1399,14 @@ export default function App() {
                                 </>
                             )}
                         </div>
+
+                        {sendResult && qrDataUrl && (
+                            <div className="ndp-receipt-qr ndp-print-only">
+                                <img src={qrDataUrl} alt="QR code linking to this transaction on the block explorer"/>
+                                <div className="ndp-receipt-qr-caption">Scan to view this transaction</div>
+                            </div>
+                        )}
+
                         <div className="ndp-receipt-bottom">Settles directly on {network.name}</div>
                     </div>
                 </div>
@@ -1469,10 +1562,20 @@ export default function App() {
                                 <button
                                     type="button"
                                     className="ndp-btn-secondary"
-                                    onClick={handlePrint}
+                                    onClick={handleDownloadPdf}
+                                    disabled={generatingPdf}
                                 >
-                                    <Printer size={14}/>
-                                    Print receipt
+                                    {generatingPdf ? (
+                                        <>
+                                            <Loader2 size={14} className="ndp-spin"/>
+                                            Generating…
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Download size={14}/>
+                                            Download PDF
+                                        </>
+                                    )}
                                 </button>
 
                                 <button

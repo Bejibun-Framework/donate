@@ -544,6 +544,14 @@ body {
     font-weight: 600;
     font-size: 13.5px;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ndp-btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .ndp-connect-btn {
@@ -781,200 +789,175 @@ body {
     display: none;
 }
 
-@media print {
-    /* App.jsx sets an exact @page size (matching the receipt's rendered
-       box) right before calling window.print(). This fixed fallback keeps
-       the page compact (instead of a full sheet of paper) for browsers
-       that ignore the dynamic override or fire print before it attaches. */
-    @page {
-        size: 460px 760px;
-        margin: 0;
-    }
+.ndp-screen-only {
+    display: block;
+}
 
-    html, body {
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #fff !important;
-        width: fit-content;
-        height: fit-content;
-    }
+/* Ticket styling for PDF export. Toggled on the receipt element itself
+   (adds/removes the .ndp-pdf-active class) for the brief moment
+   html2pdf snapshots it — @media print doesn't apply here since we're
+   not going through the browser's print pipeline at all, we're
+   rendering the live DOM straight to a canvas/PDF. */
+.ndp-pdf-active .ndp-screen-only {
+    display: none !important;
+}
 
-    /* Defensive reset for common app-shell wrappers (e.g. a full-height,
-       centered #root/#app) that live outside this stylesheet's component
-       tree — without this, a flex/centered shell can push the receipt
-       down the page and force an extra blank page. */
-    html, body, #root, #app, [id="root"], [id="app"] {
-        height: auto !important;
-        min-height: 0 !important;
-        display: block !important;
-        align-items: unset !important;
-        justify-content: unset !important;
-    }
+.ndp-pdf-active .ndp-print-only {
+    display: block !important;
+}
 
-    .ndp-no-print {
-        display: none !important;
-    }
+/* Paper till-receipt look: warm off-white card, square-ish corners,
+   hairline border — reads as a printed slip rather than a screenshot
+   of the dark app UI. */
+.ndp-receipt.ndp-pdf-active {
+    --ink: #2B2A26;
+    --muted: #8A8474;
+    --total: #B23A2E;
+    background: #FBF9F4 !important;
+    border: 1px solid #DAD3C2;
+    border-radius: 2px;
+    max-width: none;
+    width: 360px;
+    box-shadow: none !important;
+    position: relative;
+}
 
-    /* Collapse every wrapper around the receipt down to its content size,
-       so nothing but the receipt itself occupies the printed page. */
-    .ndp-root {
-        all: unset;
-        display: block !important;
-        background: #fff !important;
-        width: fit-content !important;
-        height: fit-content !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
+/* Positioned via --ndp-notch-top, set in handleDownloadPdf right before
+   capture, to the exact offset of the dashed divider above the total —
+   so the "tear here" notches always line up with that line instead of
+   an approximate 50% guess that drifts with content length. */
+.ndp-receipt.ndp-pdf-active::before, .ndp-receipt.ndp-pdf-active::after {
+    content: "";
+    position: absolute;
+    top: calc(var(--ndp-notch-top, 50%) - 8px);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid #DAD3C2;
+}
 
-    .ndp-shell {
-        all: unset;
-        display: block !important;
-        width: fit-content !important;
-    }
+.ndp-receipt.ndp-pdf-active::before {
+    left: -8px;
+}
 
-    .ndp-left {
-        all: unset;
-        display: block !important;
-        width: fit-content !important;
-    }
+.ndp-receipt.ndp-pdf-active::after {
+    right: -8px;
+}
 
-    .ndp-receipt {
-        --ink: #1B1E2E;
-        --muted: #6B7280;
-        --gold: #B8842E;
-        --teal-print: #147D68;
-        background: #FFFFFF !important;
-        border: 1px solid #E3E6EC;
-        border-radius: 18px;
-        max-width: none;
-        width: 400px;
-        margin: 6px;
-        box-shadow: none !important;
-        page-break-inside: avoid;
-        position: relative;
-        overflow: hidden;
-    }
+.ndp-pdf-active .ndp-receipt-brand {
+    text-align: center;
+    padding: 26px 24px 14px;
+}
 
-    /* Full-width two-tone band along the top — teal fading into gold —
-       so the receipt reads as a distinct printed artifact, not a
-       screenshot of the dark app UI. */
-    .ndp-receipt::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 8px;
-        background: linear-gradient(90deg, #147D68 0%, #5FE3B8 45%, #E7B24D 100%);
-    }
+.ndp-pdf-active .ndp-receipt-brand-name {
+    font-family: 'Fraunces', serif;
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: var(--ink);
+}
 
-    /* A slim teal rail down the left edge, echoing the on-screen accent
-       color without relying on backgrounds that waste ink. */
-    .ndp-receipt::after {
-        content: "";
-        position: absolute;
-        top: 8px;
-        bottom: 0;
-        left: 0;
-        width: 4px;
-        background: #147D68;
-        opacity: 0.85;
-    }
+.ndp-pdf-active .ndp-receipt-brand-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 6px;
+}
 
-    .ndp-receipt-top {
-        padding: 28px 26px 16px 32px;
-        position: relative;
-    }
+.ndp-pdf-active .ndp-perf {
+    border-top: 1px dashed #C7C0AC;
+    margin: 0 24px;
+}
 
-    .ndp-receipt-title {
-        color: var(--teal-print) !important;
-        font-weight: 700;
-    }
+.ndp-pdf-active .ndp-receipt-rows {
+    padding: 16px 24px 4px;
+    gap: 0;
+}
 
-    .ndp-receipt-id {
-        color: var(--muted) !important;
-        opacity: 0.85;
-    }
+/* Each row becomes a thin, dotted-divided line — the classic
+   line-item look of a paper receipt — instead of the app's
+   loosely-spaced rows. */
+.ndp-pdf-active .ndp-receipt-row {
+    padding: 7px 0;
+    border-top: 1px dotted #E4DFCE;
+}
 
-    .ndp-perf {
-        border-top: 1.5px dashed #C9CDD6;
-        margin: 0 6px;
-    }
+.ndp-pdf-active .ndp-receipt-rows > .ndp-receipt-row:first-child {
+    border-top: none;
+}
 
-    .ndp-perf::before, .ndp-perf::after {
-        background: #fff !important;
-        border: 1px solid #E3E6EC;
-    }
+.ndp-pdf-active .ndp-receipt-key {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--muted) !important;
+}
 
-    .ndp-receipt-rows {
-        padding: 20px 26px 6px 32px;
-        gap: 16px;
-    }
+.ndp-pdf-active .ndp-receipt-val, .ndp-pdf-active .ndp-receipt-note {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--ink) !important;
+}
 
-    .ndp-receipt-key {
-        color: var(--muted) !important;
-    }
+.ndp-pdf-active .ndp-receipt-mono-full {
+    max-width: 66%;
+    font-size: 10.5px;
+}
 
-    .ndp-receipt-val, .ndp-receipt-note {
-        color: var(--ink) !important;
-    }
+/* The amount/total row is visually promoted to the bottom of the
+   line items (via flex order, so the DOM — and therefore the
+   on-screen layout — is untouched) and styled as the ticket's bold
+   total line. */
+.ndp-pdf-active .ndp-receipt-total-row {
+    order: 10;
+    margin-top: 10px;
+    padding-top: 14px !important;
+    border-top: 1px dashed #C7C0AC !important;
+    align-items: baseline;
+}
 
-    .ndp-receipt-mono-full {
-        max-width: 66%;
-    }
+.ndp-pdf-active .ndp-receipt-total-label {
+    font-size: 12px !important;
+    font-weight: 700;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: var(--ink) !important;
+}
 
-    /* The amount gets its own soft gold-tinted panel so it reads as the
-       headline figure on the page, not just another row. */
-    .ndp-receipt-row:has(.ndp-receipt-amount) {
-        background: linear-gradient(90deg, rgba(231, 178, 77, 0.09), rgba(231, 178, 77, 0));
-        margin: 4px -12px;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid rgba(184, 132, 46, 0.18);
-    }
+.ndp-pdf-active .ndp-receipt-val.ndp-receipt-amount {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--total) !important;
+}
 
-    .ndp-receipt-val.ndp-receipt-amount {
-        color: var(--gold) !important;
-    }
+.ndp-pdf-active .ndp-receipt-qr {
+    text-align: center;
+    padding: 18px 24px 6px;
+}
 
-    .ndp-receipt-bottom {
-        padding: 18px 26px 24px 32px;
-        color: var(--muted) !important;
-        opacity: 0.9;
-        border-top: 1px dashed #E3E6EC;
-    }
+.ndp-pdf-active .ndp-receipt-qr img {
+    width: 96px;
+    height: 96px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #E4DFCE;
+}
 
-    /* A rotated "settled" seal in teal ink, stamped over the top-right
-       corner — the one bit of personality a receipt like this can carry
-       without needing a logo asset. */
-    .ndp-print-only {
-        display: flex !important;
-    }
+.ndp-pdf-active .ndp-receipt-qr-caption {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-top: 8px;
+}
 
-    .ndp-receipt-seal {
-        position: absolute;
-        top: 22px;
-        right: 22px;
-        width: 60px;
-        height: 60px;
-        border: 2px solid #147D68;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transform: rotate(-12deg);
-        opacity: 0.9;
-    }
-
-    .ndp-receipt-seal span {
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        color: #147D68;
-        text-align: center;
-        line-height: 1.3;
-        text-transform: uppercase;
-    }
+.ndp-pdf-active .ndp-receipt-bottom {
+    padding: 14px 24px 22px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--muted) !important;
+    opacity: 1;
 }
