@@ -211,6 +211,13 @@ body {
     overflow-wrap: anywhere;
 }
 
+.ndp-receipt-total-row {
+    order: 10;
+    margin-top: 4px;
+    padding-top: 16px;
+    border-top: 1px dashed rgba(238, 234, 222, 0.16);
+}
+
 .ndp-receipt-val.ndp-receipt-amount {
     font-size: 22px;
     color: var(--gold);
@@ -224,19 +231,27 @@ body {
     word-break: break-all;
 }
 
-.ndp-receipt-note {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    color: var(--muted);
-    font-style: italic;
-    text-align: right;
-    max-width: 220px;
+.ndp-receipt-note-row {
+    order: 9;
+    display: block;
+    margin-top: 2px;
+    padding-top: 14px;
+    border-top: 1px dashed rgba(238, 234, 222, 0.16);
 }
 
-@media (max-width: 880px) {
-    .ndp-receipt-note {
-        max-width: 60%;
-    }
+.ndp-receipt-note-row .ndp-receipt-key {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.ndp-receipt-note {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--ivory);
+    font-style: italic;
+    text-align: left;
+    max-width: 100%;
 }
 
 .ndp-receipt-bottom {

@@ -1370,7 +1370,6 @@ export default function App() {
 
                         <div className="ndp-receipt-top ndp-screen-only">
                             <span className="ndp-receipt-title">Donation receipt</span>
-                            <span className="ndp-receipt-id">#{network.nativeCurrency.symbol}-{coin.symbol}</span>
                         </div>
                         <div className="ndp-perf ndp-screen-only"/>
                         <div className="ndp-receipt-rows">
