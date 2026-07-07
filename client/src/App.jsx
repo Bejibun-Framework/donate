@@ -1407,7 +1407,7 @@ export default function App() {
                             {message.trim() && (
                                 <div className="ndp-receipt-row ndp-receipt-note-row">
                                     <span className="ndp-receipt-key">Note</span>
-                                    <span className="ndp-receipt-note">&ldquo;{message.trim()}&rdquo;</span>
+                                    <span className="ndp-receipt-note">{message.trim()}</span>
                                 </div>
                             )}
 
