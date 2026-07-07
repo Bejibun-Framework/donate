@@ -837,29 +837,6 @@ body {
     position: relative;
 }
 
-/* Positioned via --ndp-notch-top, set in handleDownloadPdf right before
-   capture, to the exact offset of the dashed divider above the total —
-   so the "tear here" notches always line up with that line instead of
-   an approximate 50% guess that drifts with content length. */
-.ndp-receipt.ndp-pdf-active::before, .ndp-receipt.ndp-pdf-active::after {
-    content: "";
-    position: absolute;
-    top: calc(var(--ndp-notch-top, 50%) - 8px);
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #fff;
-    border: 1px solid #DAD3C2;
-}
-
-.ndp-receipt.ndp-pdf-active::before {
-    left: -8px;
-}
-
-.ndp-receipt.ndp-pdf-active::after {
-    right: -8px;
-}
-
 .ndp-pdf-active .ndp-receipt-brand {
     text-align: center;
     padding: 26px 24px 14px;
@@ -884,7 +861,22 @@ body {
 
 .ndp-pdf-active .ndp-perf {
     border-top: 1px dashed #C7C0AC;
-    margin: 0 24px;
+    margin: 0;
+}
+
+/* Punched "tear here" notches on the header divider — a fixed position
+   right below the brand header, so unlike the old approach (anchored to
+   the total row, whose offset shifts with note/address length and
+   needed JS measurement to track), this just falls out of normal
+   layout with no measurement at all.
+   The vertical offset here is -9px, not the base rule's -8px: absolute
+   positioning measures from the divider's padding edge, but the visible
+   line is the 1px border-top itself, sitting 1px above that edge — so
+   centering on the actual line needs the extra pixel. */
+.ndp-pdf-active .ndp-perf::before, .ndp-pdf-active .ndp-perf::after {
+    top: -9px;
+    background: #FBF9F4;
+    border: 1px solid #DAD3C2;
 }
 
 .ndp-pdf-active .ndp-receipt-rows {

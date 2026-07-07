@@ -1211,26 +1211,6 @@ export default function App() {
                 await document.fonts.ready;
             }
 
-            // Line the "tear here" notches up with the dashed divider
-            // above the total — that row's top border is the actual
-            // perforation line, and its offset shifts with content
-            // (address wrapping, note length, etc.), so it's measured
-            // fresh each export rather than assumed to sit at 50%.
-            //
-            // getBoundingClientRect (not offsetTop) keeps both
-            // measurements in the same coordinate space, and the
-            // border-width correction matters because CSS positions the
-            // notches relative to the card's padding edge, not its
-            // border edge.
-            const totalRow = clone.querySelector(".ndp-receipt-total-row");
-            if (totalRow) {
-                const cloneRect = clone.getBoundingClientRect();
-                const rowRect = totalRow.getBoundingClientRect();
-                const borderTop = parseFloat(getComputedStyle(clone).borderTopWidth) || 0;
-                const notchTop = (rowRect.top - cloneRect.top) - borderTop;
-                clone.style.setProperty("--ndp-notch-top", `${notchTop}px`);
-            }
-
             const rect = clone.getBoundingClientRect();
             const width = Math.ceil(rect.width);
             const height = Math.ceil(rect.height);
@@ -1371,7 +1351,7 @@ export default function App() {
                         <div className="ndp-receipt-top ndp-screen-only">
                             <span className="ndp-receipt-title">Donation receipt</span>
                         </div>
-                        <div className="ndp-perf ndp-screen-only"/>
+                        <div className="ndp-perf"/>
                         <div className="ndp-receipt-rows">
                             {walletAddress && (
                                 <div className="ndp-receipt-row">
