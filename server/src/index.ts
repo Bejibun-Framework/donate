@@ -1,6 +1,8 @@
+import type {Chain} from "viem";
 import {Context, Hono, Next} from "hono";
 import {cors} from "hono/cors";
 import {TNetwork, TScheme} from "@bejibun/x402/types";
+import {arbitrum, base, polygon, worldchain} from "viem/chains";
 
 (globalThis as any).Bun = {
     stringWidth: (value: string) => value.length,
@@ -24,6 +26,49 @@ export type Bindings = {
 
 const DEFAULT_EVM_PAY_TO = "0xdABe8750061410D35cE52EB2a418c8cB004788B3";
 const DEFAULT_SVM_PAY_TO = "GAnoyvy9p3QFyxikWDh9hA3fmSk2uiPLNWyQ579cckMn";
+
+// Every EVM network the frontend can send, keyed by the same `eip155:<id>`
+// string used in `network.id`. The viem chain object is the single source
+// of truth for the block explorer's base URL — no separate hardcoded map
+// to keep in sync with the frontend.
+const EVM_CHAINS: Record<string, Chain> = {
+    [`eip155:${base.id}`]: base,
+    [`eip155:${polygon.id}`]: polygon,
+    [`eip155:${arbitrum.id}`]: arbitrum,
+    [`eip155:${worldchain.id}`]: worldchain
+};
+
+// Solana has no viem chain, so its explorer is tracked separately. Keyed
+// by the same `solana:<genesis-hash>` id the frontend uses.
+const SOLANA_EXPLORER_BASE: Record<string, string> = {
+    "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "https://solscan.io"
+};
+
+function isSolanaNetwork(networkId: string) {
+    return networkId.startsWith("solana:");
+}
+
+// Builds address/tx explorer links for whichever network the donation
+// came in on. Falls back to the raw value (no link) if the network id
+// isn't recognized, rather than guessing at a URL or crashing.
+function getExplorerLinks(networkId: string) {
+    if (isSolanaNetwork(networkId)) {
+        const base = SOLANA_EXPLORER_BASE[networkId];
+
+        return {
+            addressUrl: (a: string) => (base ? `${base}/account/${a}` : a),
+            txUrl: (t: string) => (base ? `${base}/tx/${t}` : t)
+        };
+    }
+
+    const chain = EVM_CHAINS[networkId];
+    const explorerBase = chain?.blockExplorers?.default?.url;
+
+    return {
+        addressUrl: (a: string) => (explorerBase ? `${explorerBase}/address/${a}` : a),
+        txUrl: (t: string) => (explorerBase ? `${explorerBase}/tx/${t}` : t)
+    };
+}
 
 const formatTokenAmount = (rawAmount, decimals = 6) => {
     const raw = BigInt(rawAmount);
@@ -136,6 +181,8 @@ app.post("/donate", async (c: Context) => {
                 const formattedTime: string = `${now.toISOString().slice(0, 19).replace("T", " ")} UTC`;
                 const txHash = settlement.transaction;
 
+                const {addressUrl, txUrl} = getExplorerLinks(payload.network.id);
+
                 const message: string = `
 ✨ <b>A New Donation Has Arrived!</b>
 ━━━━━━━━━━━━━━━━━━━━
@@ -147,13 +194,13 @@ app.post("/donate", async (c: Context) => {
 ${payload.network.name}
 
 👤 <b>Wallet</b>
-<a href="https://basescan.org/address/${payload.address}">${payload.address}</a>
+<a href="${addressUrl(payload.address)}">${payload.address}</a>
 
 📝 <b>Message of Support</b>
 ${payload.message ? `<i>"${payload.message}"</i>` : "-"}
 
 🧾 <b>Transaction</b>
-<a href="https://basescan.org/tx/${txHash}">${txHash}</a>
+<a href="${txUrl(txHash)}">${txHash}</a>
 
 🕒 <b>Time</b>
 ${formattedTime}

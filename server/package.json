@@ -11,7 +11,8 @@
   "dependencies": {
     "@bejibun/x402": "^0.2.1",
     "@coinbase/x402": "^2.1.0",
-    "hono": "^4.12.27"
+    "hono": "^4.12.27",
+    "viem": "^2.54.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",
