@@ -149,17 +149,19 @@ body {
     color: var(--muted);
 }
 
-.ndp-receipt-id {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    color: var(--muted);
-    opacity: 0.7;
-}
-
 .ndp-perf {
     position: relative;
     height: 1px;
-    border-top: 1.5px dashed rgba(238, 234, 222, 0.18);
+}
+
+/* The visible dash, inset the same 24px as the row padding — matching
+   the width/rhythm of the other dashed divider above the total — with
+   space left over before it reaches the notches at the card's edges. */
+.ndp-perf-line {
+    display: block;
+    height: 100%;
+    margin: 0 24px;
+    border-top: 1px dashed rgba(238, 234, 222, 0.16);
 }
 
 .ndp-perf::before, .ndp-perf::after {
@@ -284,20 +286,6 @@ body {
     font-size: 13.5px;
     color: var(--muted);
     margin: 0 0 26px;
-}
-
-.ndp-row-2 {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
-}
-
-/* Mobile: stack network + asset pickers */
-@media (max-width: 480px) {
-    .ndp-row-2 {
-        grid-template-columns: minmax(0, 1fr);
-    }
 }
 
 .ndp-field {
@@ -859,22 +847,19 @@ body {
     margin-top: 6px;
 }
 
-.ndp-pdf-active .ndp-perf {
+.ndp-pdf-active .ndp-perf-line {
+    margin: 0 24px;
     border-top: 1px dashed #C7C0AC;
-    margin: 0;
 }
 
 /* Punched "tear here" notches on the header divider — a fixed position
    right below the brand header, so unlike the old approach (anchored to
    the total row, whose offset shifts with note/address length and
    needed JS measurement to track), this just falls out of normal
-   layout with no measurement at all.
-   The vertical offset here is -9px, not the base rule's -8px: absolute
-   positioning measures from the divider's padding edge, but the visible
-   line is the 1px border-top itself, sitting 1px above that edge — so
-   centering on the actual line needs the extra pixel. */
+   layout with no measurement at all. The outer .ndp-perf carries no
+   border itself (that's on the inset .ndp-perf-line now), so the base
+   rule's -8px offset centers correctly with no extra correction needed. */
 .ndp-pdf-active .ndp-perf::before, .ndp-pdf-active .ndp-perf::after {
-    top: -9px;
     background: #FBF9F4;
     border: 1px solid #DAD3C2;
 }

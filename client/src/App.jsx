@@ -305,6 +305,7 @@ function isStablecoinSymbol(symbol) {
 }
 
 const AMOUNTS = [5, 10, 25, 50, 100, 250];
+const STABLECOIN_MIN_AMOUNT = 1;
 
 const SOL_LABELS = {
     phantom: "Phantom",
@@ -594,6 +595,25 @@ function shorten(value, lead = 5, tail = 5) {
     if (!value) return "";
 
     return value.length > lead + tail ? `${value.slice(0, lead)}...${value.slice(-tail)}` : value;
+}
+
+// Receipts should show an unambiguous, timezone-independent timestamp
+// rather than whatever the viewer's local clock happens to be — a
+// donor and the project reading the same receipt in different timezones
+// should see the same date/time.
+function formatUtcDate(date) {
+    const formatted = date.toLocaleString("en-US", {
+        timeZone: "UTC",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true
+    });
+
+    return `${formatted} UTC`;
 }
 
 // EVM networks carry a viem chain object, whose `blockExplorers.default.url`
@@ -1258,7 +1278,8 @@ export default function App() {
     }
 
     const numericAmount = Number(amount);
-    const canDonate = numericAmount > 0 && Number.isFinite(numericAmount);
+    const belowStablecoinMinimum = coin.stablecoin && numericAmount > 0 && numericAmount < STABLECOIN_MIN_AMOUNT;
+    const canDonate = numericAmount > 0 && Number.isFinite(numericAmount) && !belowStablecoinMinimum;
 
     const isEvm = network.chainType === "evm";
     const walletConn = isEvm ? wallet.evm : wallet.svm;
@@ -1351,7 +1372,9 @@ export default function App() {
                         <div className="ndp-receipt-top ndp-screen-only">
                             <span className="ndp-receipt-title">Donation receipt</span>
                         </div>
-                        <div className="ndp-perf"/>
+                        <div className="ndp-perf">
+                            <div className="ndp-perf-line"/>
+                        </div>
                         <div className="ndp-receipt-rows">
                             {walletAddress && (
                                 <div className="ndp-receipt-row">
@@ -1395,7 +1418,7 @@ export default function App() {
                                     <div className="ndp-receipt-row">
                                         <span className="ndp-receipt-key">Date</span>
                                         <span className="ndp-receipt-val">
-                                            {(sendResult.timestamp ?? new Date()).toLocaleString()}
+                                            {formatUtcDate(sendResult.timestamp ?? new Date())}
                                         </span>
                                     </div>
 
@@ -1443,7 +1466,6 @@ export default function App() {
                             onAddCustom={handleAddCustomToken}
                             accent={network.accent}
                             network={network}
-                            className="ndp-field"
                         />
 
                         <WalletConnect
@@ -1454,7 +1476,6 @@ export default function App() {
                             error={walletError[network.chainType] || ""}
                             onConnect={network.chainType === "evm" ? connectEvmWallet : connectSvmWallet}
                             onDisconnect={() => disconnectWallet(network.chainType)}
-                            className="ndp-field"
                         />
 
                         {coin.stablecoin && (
@@ -1489,6 +1510,13 @@ export default function App() {
                                 {coin.symbol}
                             </span>
                         </div>
+
+                        {belowStablecoinMinimum && (
+                            <p className="ndp-wallet-error">
+                                <AlertCircle size={13}/>
+                                Minimum donation is ${STABLECOIN_MIN_AMOUNT} for stablecoins.
+                            </p>
+                        )}
 
                         <div className="ndp-field">
                             <label className="ndp-label">Message (optional)</label>
