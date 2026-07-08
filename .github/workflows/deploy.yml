@@ -20,11 +20,11 @@ jobs:
 
     defaults:
       run:
-        working-directory: ./client
+        working-directory: client
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -43,10 +43,11 @@ jobs:
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: ./client/dist
+          path: client/dist
 
   deploy:
     needs: build
+    runs-on: ubuntu-latest
 
     permissions:
       pages: write
@@ -55,8 +56,6 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
-    runs-on: ubuntu-latest
 
     steps:
       - name: Deploy to GitHub Pages
